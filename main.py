@@ -122,7 +122,7 @@ PATTERNS = [
     ("AADHAAR", re.compile(r"(?i)\b[x*]{4}[ -]?[x*]{4}[ -]?\d{4}\b")),
     ("NAME", re.compile(
         r"(?im)(?<=^)([ \t]*(?:patient[ \t]+name|relative[ \t]+name|"
-        r"guardian[ \t]+name|naam|नाम|name)[ \t]*:[ \t]*)[^\r\n,;|]+"
+        r"guardian[ \t]+name|naam|name)[ \t]*:[ \t]*)[^\r\n,;|]+"
     )),
     ("NAME", re.compile(
         r"(?m)^([ \t]*(?:[01]\d|2[0-3]):[0-5]\d[ \t]*[-–][ \t]*)"

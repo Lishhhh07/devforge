@@ -75,11 +75,12 @@ def village_region(fields) -> str | None:
 _HINDI_NAME = r"[\u0904-\u0939][\u0900-\u097f]*"
 _LATIN_NAME = r"[A-Z][a-z]+(?:[.'’-][A-Za-z]+)*"
 _NAME_WORD = rf"(?:{_LATIN_NAME}|{_HINDI_NAME})"
+_LABELLED_NAME_WORD = rf"(?!(?:उम्र|आयु)(?![\u0900-\u097f])){_NAME_WORD}"
 _EXPLICIT_NAME = re.compile(
     rf"(?m)^([ \t]*(?:(?i:patient|pt\.?|attendant|guardian|mareez ka naam|"
     rf"rogi ka naam)|मरी[ज़ज] का नाम|मरीज़ का नाम|रोगी का नाम|"
-    rf"(?:अभिभावक|पिता(?:/पति)?|पति|परिजन) का नाम)"
-    rf"[ \t]*:[ \t]*)({_NAME_WORD}(?:[ \t]+{_NAME_WORD}){{0,3}})"
+    rf"नाम|(?:अभिभावक|पिता(?:/पति)?|पति|परिजन) का नाम)"
+    rf"[ \t]*:[ \t]*)({_LABELLED_NAME_WORD}(?:[ \t]+{_LABELLED_NAME_WORD}){{0,3}})"
 )
 _HONORIFIC_NAME = re.compile(
     rf"(?<![\w.\u0900-\u097f])({_NAME_WORD}(?:[ \t]+{_NAME_WORD}){{0,2}})"
@@ -106,6 +107,15 @@ _TIMESTAMPED_AUTHOR = re.compile(
     rf"\d{{1,2}}:[0-5]\d(?:[ \t]*(?i:am|pm))?\][ \t]*)"
     rf"({_NAME_WORD}(?:[ \t]+{_NAME_WORD}){{1,3}})(?=[ \t]*:[ \t]+)"
 )
+_HINDI_SYMPTOM_SUBJECT = re.compile(
+    rf"(?m)^([ \t]*)({_HINDI_NAME}(?:[ \t]+{_HINDI_NAME}){{1,3}})"
+    r"(?=[ \t]+को[ \t]+\d{1,3}[ \t]+(?:दिन|घंटे|हफ्ते|सप्ताह)[ \t]+से)"
+)
+_HINDI_ADDRESS_LINE = re.compile(r"(?m)^([ \t]*पता[ \t]*:[ \t]*)([^\r\n]+)")
+_COARSE_ADDRESS_PART = re.compile(r"^(?:तहसील|जिला|ज़िला)(?=[ \t:=])")
+_CLINICAL_ADDRESS_PART = re.compile(
+    r"(?i)^(?:bp|pulse|spo2|dose|diagnosis|बुखार|दवा|निदान)(?=\s|[:=])"
+)
 _CLINICIAN_PREFIX = re.compile(r"(?i)(?:\bdr\.?|\bdoctor|डॉ\.?)\s*$")
 _CLINICAL_WORDS = frozenset({
     "bp", "pulse", "temp", "spo2", "k/c/o", "dose", "report",
@@ -131,12 +141,28 @@ def redact_contextual_names(text):
         count += 1
         return "[NAME]"
 
-    for pattern in (_EXPLICIT_NAME, _LAB_REPORT_NAME, _TIMESTAMPED_AUTHOR):
+    for pattern in (_EXPLICIT_NAME, _LAB_REPORT_NAME, _TIMESTAMPED_AUTHOR, _HINDI_SYMPTOM_SUBJECT):
         text = pattern.sub(replace_explicit, text)
     for pattern in (_HONORIFIC_NAME, _CLINICAL_POSSESSOR):
         text = pattern.sub(replace_honorific, text)
-    text, location_count = _HINDI_LOCATION.subn(r"\1\2[ADDRESS]", text)
-    count += location_count
+    def replace_address(match):
+        nonlocal count
+        parts = [part.strip() for part in re.split(r"[,;|]", match[2])]
+        if any(_CLINICAL_ADDRESS_PART.match(part) for part in parts):
+            return match[0]
+        retained = [part for part in parts if _COARSE_ADDRESS_PART.match(part)]
+        count += 1
+        return match[1] + ", ".join(["[ADDRESS]", *retained])
+
+    def replace_location(match):
+        nonlocal count
+        if match[3].strip() == "[ADDRESS]":
+            return match[0]
+        count += 1
+        return match[1] + match[2] + "[ADDRESS]"
+
+    text = _HINDI_ADDRESS_LINE.sub(replace_address, text)
+    text = _HINDI_LOCATION.sub(replace_location, text)
     return text, count
 
 

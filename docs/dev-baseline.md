@@ -53,3 +53,5 @@ Worker-local exact name matching reduced the remaining count to 375 of 3,230 wit
 Hindi address and relative labels, Devanagari-digit phone matching and clinical-context possessive patterns reduced the remaining count to 290 of 3,230. The Devanagari leak rate fell from 62.9% to 32.2%. Hinglish leakage held at 46.8%. The contract passed, every medical probe survived and no canaries were found.
 
 Lab report headers, timestamped message authors and additional Hinglish honorifics reduced Hinglish leakage from 46.8% to 8.1%. Overall leakage fell to 244 of 3,230. The contract passed, all 4,855 medical probes survived, no canaries were found and linkage held at 1.00 precision and 0.56 recall.
+
+Hindi symptom-subject recognition and address-line redaction reduced the remaining practice leaks to 198 of 3,230. No annotated Devanagari leaks were found, down from 32.2%. The contract passed, all 4,855 medical probes survived and no canaries were found. Linkage held at 1.00 precision and 0.56 recall.
