@@ -21,7 +21,8 @@ _FIELDS = {
     "AADHAAR": ("aadhaar", "aadhaar no", "aadhaar number", "aadhar", "aadhar no"),
     "ABHA": ("abha", "abha no", "abha number", "abha address"),
     "PAN": ("pan", "pan no", "pan number"),
-    "INSURANCE_ID": ("insurance id", "policy number", "member id"),
+    "INSURANCE_ID": ("insurance id", "insurance no", "insurance number", "policy no",
+                     "policy number", "member id", "pmjay id", "insurance member id"),
     "ADDRESS": ("address", "street", "house", "house no", "landmark", "locality", "pata",
                 "पता", "मकान", "मकान नंबर", "मोहल्ला"),
     "SOURCE_PATH": ("source path", "original filename", "source filename"),
@@ -57,6 +58,10 @@ _COARSE_LOCATIONS = {
 
 def is_coarse_location(label: str) -> bool:
     return _normalize(label) in _COARSE_LOCATIONS
+
+
+def is_lower_region(label: str) -> bool:
+    return _COARSE_LOCATIONS.get(_normalize(label)) in {1, 2} or identifier_kind(label) == "VILLAGE"
 
 
 def village_region(fields) -> str | None:
@@ -112,10 +117,15 @@ _HINDI_SYMPTOM_SUBJECT = re.compile(
     rf"(?m)^([ \t]*)({_HINDI_NAME}(?:[ \t]+{_HINDI_NAME}){{1,3}})"
     r"(?=[ \t]+को[ \t]+\d{1,3}[ \t]+(?:दिन|घंटे|हफ्ते|सप्ताह)[ \t]+से)"
 )
-_HINDI_ADDRESS_LINE = re.compile(r"(?m)^([ \t]*पता[ \t]*:[ \t]*)([^\r\n]+)")
-_COARSE_ADDRESS_PART = re.compile(r"^(?:तहसील|जिला|ज़िला)(?=[ \t:=])")
+_ADDRESS_LINE = re.compile(r"(?im)^([ \t]*(?:पता|address|postal address|patient address)"
+                           r"[ \t]*:[ \t]*)([^\r\n]+)")
+_COARSE_ADDRESS_PART = re.compile(r"(?i)^(?:तहसील|जिला|ज़िला|district|tehsil|tahsil)(?=[ \t:=])")
+_LABELLED_PIN = re.compile(r"(?i)(\b(?:pin(?:[ \t]+code)?|post[ \t]*code)[ \t]*[:=]?[ \t]*)"
+                           r"(\d{3})\d{3}(?!\d)")
+_ADDRESS_PIN = re.compile(r"(?<!\d)(\d{3})\d{3}(?!\d)")
 _CLINICAL_ADDRESS_PART = re.compile(
     r"(?i)^(?:bp|pulse|spo2|dose|diagnosis|बुखार|दवा|निदान)(?=\s|[:=])"
+    r"|\b\d+(?:\.\d+)?[ \t]*(?:mg|mcg|ml|mmhg|mg/dl)\b"
 )
 _CLINICIAN_PREFIX = re.compile(r"(?i)(?:\bdr\.?|\bdoctor|डॉ\.?)\s*$")
 _CLINICAL_WORDS = frozenset({
@@ -149,9 +159,9 @@ def redact_contextual_names(text):
     def replace_address(match):
         nonlocal count
         parts = [part.strip() for part in re.split(r"[,;|]", match[2])]
-        if any(_CLINICAL_ADDRESS_PART.match(part) for part in parts):
+        if any(_CLINICAL_ADDRESS_PART.search(part) for part in parts):
             return match[0]
-        retained = [part for part in parts if _COARSE_ADDRESS_PART.match(part)]
+        retained = [_ADDRESS_PIN.sub(r"\1***", part) for part in parts if _COARSE_ADDRESS_PART.match(part)]
         count += 1
         return match[1] + ", ".join(["[ADDRESS]", *retained])
 
@@ -162,8 +172,10 @@ def redact_contextual_names(text):
         count += 1
         return match[1] + match[2] + "[ADDRESS]"
 
-    text = _HINDI_ADDRESS_LINE.sub(replace_address, text)
+    text = _ADDRESS_LINE.sub(replace_address, text)
     text = _HINDI_LOCATION.sub(replace_location, text)
+    text, pins = _LABELLED_PIN.subn(r"\1\2***", text)
+    count += pins
     return text, count
 
 

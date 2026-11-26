@@ -6,7 +6,7 @@ import io
 import json
 from pathlib import PurePosixPath
 
-from raksha.detection import identifier_kind, is_coarse_location
+from raksha.detection import identifier_kind, is_coarse_location, is_lower_region
 
 
 def age_value(value):
@@ -21,8 +21,8 @@ def age_value(value):
 def proposed_profile_fields(record, width, geography_token):
     """Return only generalised ages and keys for equality on coarse locations."""
     if not isinstance(record, dict):
-        return (), ()
-    ages, places = set(), set()
+        return (), (), ()
+    ages, places, parents = set(), set(), set()
     pending = [record]
     while pending:
         fields = pending.pop()
@@ -32,8 +32,9 @@ def proposed_profile_fields(record, width, geography_token):
             elif identifier_kind(label) == "AGE" and (age := age_value(value)) is not None:
                 ages.add(age // width * width)
             elif is_coarse_location(label) and isinstance(value, str) and value.strip():
-                places.add(geography_token(" ".join(value.casefold().split())))
-    return tuple(sorted(ages)), tuple(sorted(places))
+                token = geography_token(" ".join(value.casefold().split()))
+                (places if is_lower_region(label) else parents).add(token)
+    return tuple(sorted(ages)), tuple(sorted(places)), tuple(sorted(parents))
 
 
 def plan_age_bands(candidates, width, min_group_size):
@@ -61,6 +62,37 @@ def plan_age_bands(candidates, width, min_group_size):
         for patient in cohort
         if len(cohort) > counts[signatures[patient]]
     )
+
+
+def plan_release_fields(candidates, width, min_group_size):
+    widened = plan_age_bands(
+        ((patient, ages, tuple(sorted(set(places) | set(parents))))
+         for patient, ages, places, parents in candidates), width, min_group_size,
+    )
+    profiles = defaultdict(lambda: (set(), set(), set()))
+    for patient, ages, places, parents in candidates:
+        profile = profiles[patient]
+        for target, values in zip(profile, (ages, places, parents)):
+            target.update(values)
+    signatures = {}
+    for patient, (ages, places, parents) in profiles.items():
+        if ages and places and parents:
+            size = 2 * width if patient in widened else width
+            signatures[patient] = (
+                size, frozenset(age // size * size for age in ages), frozenset(places), frozenset(parents),
+            )
+    counts = Counter(signatures.values())
+    options = defaultdict(set)
+    for patient, signature in signatures.items():
+        size, ages, _, parents = signature
+        if counts[signature] < min_group_size:
+            options[size, ages, parents].add(patient)
+    coarse = {
+        patient for group in options.values() for patient in group
+        if len(group) > counts[signatures[patient]]
+    }
+    return {patient: (2 * width if patient in widened else None, patient in coarse)
+            for patient in widened | coarse}
 
 
 def _contains_patient(value, patient):

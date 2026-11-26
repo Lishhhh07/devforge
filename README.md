@@ -27,7 +27,7 @@ For scoring, use input unpacked directly from the organizer ZIP. Checkout line-e
 
 ## Current privacy pipeline
 
-The CLI routes known sources to hospital workers and sends other sources to an unassigned worker. Each worker parses and sanitises its own records in a separate local process. The workers exchange keyed linkage tokens and decisions with the coordinator through local pipes. The coordinator sees scoped hospital ID tokens and eligible shared national ID tokens, then returns pseudonyms and date offsets. The release assembler receives sanitised bytes and manifests.
+The CLI routes known sources to hospital workers and sends other sources to an unassigned worker. Each worker parses and sanitises its own records in a separate local process. The workers exchange keyed linkage tokens and decisions with the coordinator through local pipes. The coordinator uses scoped hospital IDs and eligible shared national IDs. It also attaches ID-less fragments when an exact full name and labelled phone token identifies one existing group. Conflicting claims remain unlinked. The release assembler receives sanitised bytes and manifests.
 
 Structured labels and free-text patterns drive redaction. File paths use keyed tokens. Linked records carry the same pseudonym in the output and the record index, and their recognized dates use a consistent per-patient offset. Explicit age and PIN fields become age bands and PIN prefixes.
 
@@ -38,7 +38,7 @@ The worker checks rendered exports against the explicitly identified hospital ID
 ## P0 architecture workflow
 
 1. Keep the published identity graph separate from the hospital-local timeline graph. An exact qualified encounter ID can preserve an interval across files without assigning a patient pseudonym. Conflicting patient evidence blocks encounter-level inheritance.
-2. Plan the release from proposed profile values. The first pass combines linked profiles' proposed age bands and keyed coarse-geography values, then widens eligible age bands only when they gain comparison peers. Workers apply the revision before rendering. The assembler stages their outputs in memory and verifies file accounting and output mappings before writing. Profile-level geography escalation and broader disclosure checks remain planned.
+2. Plan the release from proposed profile values. The planner widens age bands when profiles gain comparison peers. It can also withhold structured district and tehsil fields when that adds peers with the same explicit state or country evidence. Workers apply revisions before rendering. The assembler stages their outputs in memory and verifies file accounting, output mappings and record locators before writing. Free-text geography and profile signatures with no explicit broader region do not use the geography escalation.
 3. Verify each change with a targeted fixture, the toolkit contract validator and the practice privacy, utility and linkage checks. Verify deterministic output before expanding the planner to more generalisation rules.
 
 `config/policy.yaml` holds your privacy settings (age band width, date shift range, minimum group size).

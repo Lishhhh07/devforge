@@ -7,7 +7,7 @@ from uuid import UUID
 from raksha.ingestion import Quarantine
 
 
-def rewrite_bundle(bundle, key, clean_text, patient, shift):
+def rewrite_bundle(bundle, key, clean_text, patient, shift, *, coarse_geo=False):
     def opaque(value):
         return str(UUID(bytes=hmac.digest(key, value.encode("utf-8"), sha256)[:16], version=4))
 
@@ -69,9 +69,12 @@ def rewrite_bundle(bundle, key, clean_text, patient, shift):
                         if label not in {"name", "contact", "telecom", "text", "extension", "photo"}
                         and (label != "birthDate" or patient)}
             if isinstance(resource.get("address"), list):
+                retained = {"use", "type", "state", "country"}
+                if not coarse_geo:
+                    retained.add("district")
                 resource["address"] = [
                     {label: value for label, value in address.items()
-                     if label in {"use", "type", "district", "state", "country"}}
+                     if label in retained}
                     for address in resource["address"] if isinstance(address, dict)
                 ]
                 resource["address"] = [address for address in resource["address"] if address]

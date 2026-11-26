@@ -65,3 +65,9 @@ The three Windows practice runs took 4.77-9.25 seconds wall-clock. Peak sampled 
 `python -m raksha.audit --output OUTPUT` measures within-release uniqueness for linked profiles with both a structured age band and a district. In this release, 28 of 44 covered profiles were unique (63.6%), out of 66 linked profiles total. This is a two-field risk indicator. It excludes unlinked records, free text and external reference datasets.
 
 The held-out synthetic regression uses a separate, generated input bundle without practice fixtures. It blocks Python socket operations and verifies repeatability, changed pseudonyms and shifted dates with a second secret, exact clinical intervals, unchanged input hashes, mixed-encoding handling and explicit quarantine of duplicate JSON properties and non-finite numbers. A separate forced-collision test verifies that two patient groups receive distinct pseudonyms.
+
+## Fragment linkage and geography checkpoint
+
+Protected full-name and phone claims now attach ID-less records only to a unique, independently anchored group. The release planner can withhold structured district, tehsil and village fields when profiles with the same explicit broader region gain comparison peers. Independent end-to-end tests verified these actions, conflicting-claim handling, retained medication values and consistent dates.
+
+The organizer ZIP returned `CONTRACT OK`. Contextual address, admission ID, insurance ID and PIN rules reduced practice leaks to 99 of 3,230 (3.1%). All 4,855 clinical probes survived and no planted canaries were found. Practice linkage held at 1.00 precision and 0.56 recall. The structured age-and-district uniqueness indicator remained 28 of 44 covered profiles.

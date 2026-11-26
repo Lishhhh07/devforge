@@ -63,7 +63,7 @@ def coordinate(jobs, worker, resolve, plan_release):
         revisions = plan_release(candidates)
         for _, connection, namespace in active:
             patients = {patient for patient, _ in decisions.get(namespace, {}).values()}
-            connection.send(revisions & patients)
+            connection.send({patient: revisions[patient] for patient in patients if patient in revisions})
 
         for _, connection, _ in active:
             kind, payload = connection.recv()
@@ -86,8 +86,9 @@ def identity_groups(batches):
     claims = defaultdict(lambda: defaultdict(set))
     for namespace, evidence in batches:
         if namespace != "unassigned":
-            for local, qualified, shared in evidence:
-                scopes[qualified].add(local)
+            for local, qualified, shared, _ in evidence:
+                if qualified:
+                    scopes[qualified].add(local)
                 if shared:
                     shared_by_local[local].add(shared)
                     claims[shared][namespace].add(local)
@@ -100,10 +101,29 @@ def identity_groups(batches):
         if all(len(shared_by_local[local]) == 1 for local in members):
             merged.update((local, shared) for local in members)
 
+    anchored = {}
+    corroboration = defaultdict(set)
+    fragments = set()
     for namespace, evidence in batches:
-        for local, qualified, _ in sorted(evidence):
-            if namespace != "unassigned":
-                yield namespace, local, merged.get(local, local)
-            elif len(scopes[qualified]) == 1:
-                match = next(iter(scopes[qualified]))
-                yield namespace, local, merged.get(match, match)
+        for local, qualified, _, support in evidence:
+            if not qualified:
+                fragments.add((namespace, local, support))
+                continue
+            target = local if namespace != "unassigned" else None
+            if target is None and len(scopes[qualified]) == 1:
+                target = next(iter(scopes[qualified]))
+            if target is not None:
+                group = merged.get(target, target)
+                anchored[namespace, local] = group
+                if support:
+                    corroboration[support].add(group)
+            elif support:
+                # An unresolved explicit ID can conflict with a possible attachment.
+                corroboration[support].add(None)
+
+    for (namespace, local), group in sorted(anchored.items()):
+        yield namespace, local, group
+    for namespace, local, support in sorted(fragments):
+        groups = corroboration[support]
+        if len(groups) == 1 and None not in groups:
+            yield namespace, local, next(iter(groups))

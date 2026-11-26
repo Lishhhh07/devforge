@@ -13,6 +13,8 @@ import unittest
 from unittest.mock import patch
 
 from main import resolve
+from raksha.distributed import identity_groups
+from raksha.linkage import corroborating_identity
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -24,6 +26,60 @@ def snapshot(root):
 
 
 class TrackThreeTest(unittest.TestCase):
+    def test_cross_worker_fragment_and_geography_revision(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as directory:
+            workspace = Path(directory)
+            inputs, output = workspace / "input", workspace / "release"
+            inputs.mkdir()
+            rows = [
+                ("arogya_registration.csv", "AST-312", "Ravin Mehra", "8123450679", "West District"),
+                ("sanjeevani_registration.csv", "SUN-893", "Tanuja Vyas", "8452739016", "East District"),
+            ]
+            for filename, identifier, name, phone, district in rows:
+                (inputs / filename).write_text(
+                    "UHID,Patient Name,Mobile,Age,District,State,Dose\n"
+                    f"{identifier},{name},{phone},42,{district},Uttar Pradesh,5 mg\n",
+                    encoding="utf-8",
+                )
+            (inputs / "notes.txt").write_text(
+                "Patient Name: Ravin Mehra\nPhone: +91 81234-50679\n2026-03-01\n"
+                "Ramipril 5 mg\n", encoding="utf-8",
+            )
+            result = subprocess.run(
+                [sys.executable, str(ROOT / "main.py"), "--input", str(inputs), "--output", str(output)],
+                cwd=ROOT, env={**os.environ, "RAKSHA_SECRET": "privacy-fixture"},
+                capture_output=True, text=True, timeout=120,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            exported = {}
+            for filename, *_ in rows:
+                path = output / "sanitized" / filename
+                with path.open(encoding="utf-8", newline="") as stream:
+                    exported[filename] = next(csv.DictReader(stream))
+                self.assertEqual(exported[filename]["District"], "[REGION]")
+                self.assertEqual(exported[filename]["State"], "Uttar Pradesh")
+                self.assertEqual(exported[filename]["Dose"], "5 mg")
+            first = exported[rows[0][0]]["UHID"]
+            second = exported[rows[1][0]]["UHID"]
+            self.assertNotEqual(first, second)
+            note = (output / "sanitized/notes.txt").read_text(encoding="utf-8")
+            self.assertIn(f"Patient: {first}\n", note)
+            self.assertNotIn("Ravin Mehra", note)
+            self.assertNotIn("2026-03-01", note)
+
+    def test_name_and_phone_only_attach_to_unambiguous_anchored_groups(self):
+        name = "Ravin Mehra"
+        support = corroborating_identity({"Patient Name": name, "Mobile": "+91 (81234) 50679"})
+        self.assertEqual(support, corroborating_identity(f"Name: {name}\nPhone: 81234-50679"))
+        self.assertIsNone(corroborating_identity({"Patient Name": name, "UHID": "TST-999",
+                                                  "MRN": "TST-888", "Phone": "81234-50679"}))
+        anchor = ("hospital-a", {("local-a", "qualified-a", "", support)})
+        fragment = ("unassigned", {("fragment", "", "", support)})
+        self.assertIn(("unassigned", "fragment", "local-a"), list(identity_groups([anchor, fragment])))
+        conflict = ("hospital-b", {("local-b", "qualified-b", "", support)})
+        self.assertNotIn(("unassigned", "fragment", "local-a"),
+                         list(identity_groups([anchor, conflict, fragment])))
+
     def test_distinct_groups_with_colliding_pseudonyms(self):
         groups = [("first", "local-a", "group-a"), ("second", "local-b", "group-b")]
         with patch("main.identity_groups", return_value=iter(reversed(groups))), patch(

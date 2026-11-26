@@ -32,14 +32,16 @@ from pathlib import Path
 
 from raksha.dates import column_date_orders, infer_date_order, shift_dates
 from raksha.detection import (
-    identifier_kind, is_coarse_location, known_name_keys, redact_contextual_names,
+    identifier_kind, is_coarse_location, is_lower_region, known_name_keys, redact_contextual_names,
     redact_known_names, village_region,
 )
 from raksha.distributed import coordinate, identity_groups, linkage_token, partition
 from raksha.fhir import patient_evidence, rewrite_bundle
 from raksha.ingestion import Quarantine, parse
-from raksha.linkage import patient_key, redact_labelled_ids, shared_identity
-from raksha.release import age_value, plan_age_bands, proposed_profile_fields, validate_record_index
+from raksha.linkage import (
+    corroborating_identity, is_patient_name, patient_key, redact_labelled_ids, shared_identity,
+)
+from raksha.release import age_value, plan_release_fields, proposed_profile_fields, validate_record_index
 from raksha.timeline import encounter_key, encounter_offsets, redact_encounter
 
 ATTACHMENT_FIELDS = {"attachment", "attachments"}
@@ -119,6 +121,10 @@ PATTERNS = [
     ("EMAIL", re.compile(r"[\w.+-]+@[\w-]+\.[\w.]+")),
     ("PAN", re.compile(r"\b[A-Z]{5}\d{4}[A-Z]\b")),
     ("AADHAAR", re.compile(r"(?i)\b[x*]{4}[ -]?[x*]{4}[ -]?\d{4}\b")),
+    ("MRN", re.compile(
+        r"(?i)(\b(?:ipd|admission|inpatient)[ \t]+(?:no\.?|number|id)"
+        r"[ \t]*[:=][ \t]*)[A-Z]{2,}[A-Z0-9/-]*\d{3,}(?![\w/-])"
+    )),
     ("NAME", re.compile(
         r"(?im)(?<=^)([ \t]*(?:patient[ \t]+name|relative[ \t]+name|"
         r"guardian[ \t]+name|naam|name)[ \t]*:[ \t]*)[^\r\n,;|]+"
@@ -157,7 +163,7 @@ _ID_WORD = re.compile(r"(?<![\w/-])[A-Z]{2,}[A-Z0-9/-]*\d{3,}(?![\w/-])", re.IGN
 def clean_text(text: str) -> str:
     """Replace detected identifiers with typed placeholders. TODO(team): much more than regex."""
     for kind, rx in PATTERNS:
-        replacement = rf"\1[{kind}]" if kind in {"NAME", "RELATIVE"} else f"[{kind}]"
+        replacement = rf"\1[{kind}]" if kind in {"NAME", "RELATIVE", "MRN"} else f"[{kind}]"
         text, n = rx.subn(replacement, text)
         Stats.identifiers += n
     text, contextual_count = redact_contextual_names(text)
@@ -176,7 +182,10 @@ def clean_text(text: str) -> str:
 
 
 def clean_value(v, kind=None, *, fhir=False, days=0, month_first=None, age_width=None,
-                region=None, attachment=False):
+                region=None, attachment=False, coarse_geo=False):
+    if kind == "COARSE_REGION" and isinstance(v, str) and v.strip():
+        Stats.transformations += 1
+        return "[REGION]"
     if kind == "VILLAGE" and isinstance(v, str) and v.strip():
         Stats.transformations += 1
         return clean_text(region) if region and region.casefold() != v.strip().casefold() else "[VILLAGE]"
@@ -206,7 +215,7 @@ def clean_value(v, kind=None, *, fhir=False, days=0, month_first=None, age_width
     if isinstance(v, list):
         return [
             clean_value(x, kind, fhir=fhir, days=days, month_first=month_first,
-                        age_width=age_width, region=region, attachment=attachment)
+                        age_width=age_width, region=region, attachment=attachment, coarse_geo=coarse_geo)
             for x in v
         ]
     if isinstance(v, dict):
@@ -223,6 +232,8 @@ def clean_value(v, kind=None, *, fhir=False, days=0, month_first=None, age_width
                     key = f"{stem}_{index}"
                     index += 1
             field_kind = None if fhir else identifier_kind(label)
+            if coarse_geo and is_lower_region(label):
+                field_kind = "COARSE_REGION"
             inherited_kind = None if kind == "ADDRESS" and is_coarse_location(label) else kind
             if inline_payload and label.casefold() == "data" and isinstance(value, str) and value:
                 result[key] = ""
@@ -232,6 +243,7 @@ def clean_value(v, kind=None, *, fhir=False, days=0, month_first=None, age_width
                 value, field_kind or inherited_kind, fhir=fhir, days=days,
                 month_first=month_first, age_width=age_width, region=local_region,
                 attachment=not fhir and label.casefold() in ATTACHMENT_FIELDS,
+                coarse_geo=coarse_geo,
             )
         return result
     return v  # numbers, booleans, null keep their type
@@ -249,17 +261,22 @@ def process_csv(rows: list[list[str]], delimiter: str, rel: str, records: list, 
     decisions = [lookup(dict(zip(header, row))) for row in body]
     orders = column_date_orders(header, body)
     w.writerow([clean_text(label) for label in header])
-    for i, (row, (pid, days, age_width)) in enumerate(zip(body, decisions)):
+    for i, (row, (pid, days, age_width, coarse_geo)) in enumerate(zip(body, decisions)):
         before = Stats.transformations
         region = village_region(zip(header, row))
+        row_kinds = [("COARSE_REGION" if coarse_geo and is_lower_region(label) else kind)
+                     for label, kind in zip(header, kinds)]
         cleaned = [
-            clean_value(cell, kinds[index] if index < len(kinds) else None, days=days, age_width=age_width,
+            clean_value(cell, row_kinds[index] if index < len(row_kinds) else None, days=days, age_width=age_width,
                         month_first=orders[index] if index < len(orders) else None, region=region)
             for index, cell in enumerate(row)
         ]
         if pid:
             slot = next((index for index, (kind, cell) in enumerate(zip(kinds, row))
                          if kind == "MRN" and cell.strip()), None)
+            if slot is None:
+                slot = next((index for index, (label, cell) in enumerate(zip(header, row))
+                             if is_patient_name(label) and cell.strip()), None)
             if slot is None:
                 pid = None
             else:
@@ -274,10 +291,11 @@ def process_csv(rows: list[list[str]], delimiter: str, rel: str, records: list, 
 
 def process_json(data, is_fhir: bool, rel: str, records: list, lookup) -> str:
     if is_fhir:
-        pid, days, _ = lookup(patient_evidence(data))
+        pid, days, _, coarse_geo = lookup(patient_evidence(data))
         key = hmac.digest(release_key(b"fhir"), rel.encode("utf-8"), "sha256")
         cleaned = rewrite_bundle(
             data, key, clean_text, pid, lambda value: shift_dates(value, days) if days else value,
+            coarse_geo=coarse_geo,
         )
         records.append({"file": f"sanitized/{rel}", "loc": "doc", "patient": pid})
         return json.dumps(cleaned, ensure_ascii=False, indent=2) + "\n"
@@ -318,9 +336,11 @@ def process_json(data, is_fhir: bool, rel: str, records: list, lookup) -> str:
 
 
 def clean_json_record(data, lookup, *, fhir=False):
-    pid, days, age_width = lookup(data) if not fhir and isinstance(data, dict) else (None, 0, None)
+    pid, days, age_width, coarse_geo = (
+        lookup(data) if not fhir and isinstance(data, dict) else (None, 0, None, False)
+    )
     before = Stats.transformations
-    cleaned = clean_value(data, fhir=fhir, days=days, age_width=age_width)
+    cleaned = clean_value(data, fhir=fhir, days=days, age_width=age_width, coarse_geo=coarse_geo)
     Stats.generalized += Stats.transformations > before
     if pid:
         cleaned["raksha_patient"] = pid
@@ -328,7 +348,7 @@ def clean_json_record(data, lookup, *, fhir=False):
 
 
 def process_text(text: str, rel: str, records: list, lookup) -> str:
-    pid, days, _ = lookup(text)
+    pid, days, _, _ = lookup(text)
     records.append({"file": f"sanitized/{rel}", "loc": "doc", "patient": pid})
     Stats.records += 1
     text, removed = redact_labelled_ids(text)
@@ -421,8 +441,8 @@ def resolve(batches):
 
 
 def release_revisions(candidates):
-    return plan_age_bands(candidates, int(POLICY.get("age_band_years", 5)),
-                          int(POLICY.get("min_group_size", 5)))
+    return plan_release_fields(candidates, int(POLICY.get("age_band_years", 5)),
+                               int(POLICY.get("min_group_size", 5)))
 
 
 def hospital_worker(connection, namespace, paths):
@@ -443,19 +463,23 @@ def hospital_worker(connection, namespace, paths):
                 for record in evidence_records(doc):
                     known_names.update(known_name_keys(record))
                     key = patient_key(record)
+                    support = corroborating_identity(record)
+                    protected = linkage_token(SECRET, "name-phone", support) if support else ""
                     if key:
                         known_ids.add(key.split("|", 1)[1])
                         shared = shared_identity(record) if namespace != "unassigned" else None
                         evidence.add((linkage_token(SECRET, namespace, key),
                                       linkage_token(SECRET, "qualified", key),
-                                      linkage_token(SECRET, "shared", shared) if shared else ""))
+                                      linkage_token(SECRET, "shared", shared) if shared else "", protected))
+                    elif support:
+                        evidence.add((linkage_token(SECRET, namespace, support), "", "", protected))
         connection.send(("evidence", evidence))
         Stats.known_ids = frozenset(known_ids)
         Stats.known_names = frozenset(known_names)
         decisions = connection.recv()
 
         def identity(record):
-            key = patient_key(record)
+            key = patient_key(record) or corroborating_identity(record)
             if key:
                 return decisions.get(linkage_token(SECRET, namespace, key), (None, 0))
             return None, 0
@@ -468,11 +492,11 @@ def hospital_worker(connection, namespace, paths):
             for record in evidence_records(doc):
                 patient, _ = identity(record)
                 if patient:
-                    bands, geography = proposed_profile_fields(
+                    bands, geography, parents = proposed_profile_fields(
                         record, width, lambda value: linkage_token(SECRET, "release-geography", value),
                     )
-                    if bands or geography:
-                        candidates.add((patient, bands, geography))
+                    if bands or geography or parents:
+                        candidates.add((patient, bands, geography, parents))
         connection.send(("candidates", candidates))
         revisions = connection.recv()
 
@@ -488,7 +512,8 @@ def hospital_worker(connection, namespace, paths):
         def lookup(record):
             pid, days = identity(record)
             encounter = encounter_key(record)
-            return pid, offsets.get(encounter, days), 2 * width if pid in revisions else None
+            age_width, coarse_geo = revisions.get(pid, (None, False))
+            return pid, offsets.get(encounter, days), age_width, coarse_geo
 
         results = []
         for index, relative, entry, doc in documents:
