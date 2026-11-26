@@ -8,6 +8,10 @@ _DATE = re.compile(
     r"(?<!\d)(?:(\d{4})([-/])(\d{2})\2(\d{2})|"
     r"(\d{1,2})([-/])(\d{1,2})\6(\d{4}))(?!\d)"
 )
+_DOB_FIELD = re.compile(
+    r"(?im)^([ \t]*(?:dob|date of birth|birth date|जन्म तिथि)[ \t]*:[ \t]*)"
+    r"(\d{1,4}[-/]\d{1,2}[-/]\d{1,4})(?!\d)"
+)
 
 
 def _detected_orders(values):
@@ -69,3 +73,12 @@ def shift_dates(text: str, days: int, *, month_first: bool | None = None) -> str
             return match[0]
 
     return _DATE.sub(replace, text)
+
+
+def hide_unshiftable_birth_dates(text, days, month_first):
+    def replace(match):
+        if days and shift_dates(match[2], days, month_first=month_first) != match[2]:
+            return match[0]
+        return match[1] + "[DOB]"
+
+    return _DOB_FIELD.sub(replace, text)

@@ -30,9 +30,9 @@ import sys
 import time
 from pathlib import Path
 
-from raksha.dates import column_date_orders, infer_date_order, shift_dates
+from raksha.dates import column_date_orders, hide_unshiftable_birth_dates, infer_date_order, shift_dates
 from raksha.detection import (
-    identifier_kind, is_coarse_location, is_lower_region, known_name_keys, redact_contextual_names,
+    identifier_kind, identifying_header, is_coarse_location, is_lower_region, known_name_keys, redact_contextual_names,
     redact_known_names, village_region,
 )
 from raksha.distributed import coordinate, identity_groups, linkage_token, partition
@@ -122,8 +122,12 @@ PATTERNS = [
     ("PAN", re.compile(r"\b[A-Z]{5}\d{4}[A-Z]\b")),
     ("AADHAAR", re.compile(r"(?i)\b[x*]{4}[ -]?[x*]{4}[ -]?\d{4}\b")),
     ("MRN", re.compile(
-        r"(?i)(\b(?:ipd|admission|inpatient)[ \t]+(?:no\.?|number|id)"
+        r"(?i)((?:\b(?:ipd|admission|inpatient)[ \t]+(?:no\.?|number|id)|आईपीडी[ \t]+सं\.?)"
         r"[ \t]*[:=][ \t]*)[A-Z]{2,}[A-Z0-9/-]*\d{3,}(?![\w/-])"
+    )),
+    ("MRN", re.compile(
+        r"(?im)(\bbed[ \t]+\d{1,3}[ \t]+[-–][ \t]+)"
+        r"[A-Z]{2,}[A-Z0-9/-]*\d{3,}(?=[ \t]*$)"
     )),
     ("NAME", re.compile(
         r"(?im)(?<=^)([ \t]*(?:patient[ \t]+name|relative[ \t]+name|"
@@ -142,6 +146,10 @@ PATTERNS = [
         r"(?m)(\b(?:[SDWsdw]/[Oo]|पुत्र|पुत्री|पत्नी)[ \t]+)"
         r"[^\W\d_][\w\u0900-\u097f.'’-]*(?:[ \t]+"
         r"(?:[A-Z][\w.'’-]*|[\u0900-\u097f]+)){1,3}"
+    )),
+    ("RELATIVE", re.compile(
+        r"(?m)(\b[SDWsdw]/[Oo][ \t]+)(?:[A-Z][a-z]+|[\u0904-\u0939][\u0900-\u097f]*)"
+        r"(?=[ \t]*(?:[,;)]|$))"
     )),
 ]
 
@@ -260,7 +268,14 @@ def process_csv(rows: list[list[str]], delimiter: str, rel: str, records: list, 
     kinds = [identifier_kind(label) for label in header]
     decisions = [lookup(dict(zip(header, row))) for row in body]
     orders = column_date_orders(header, body)
-    w.writerow([clean_text(label) for label in header])
+    released_header = []
+    for index, label in enumerate(header):
+        if identifying_header(label):
+            released_header.append(f"redacted_column_{index + 1}")
+            Stats.identifiers += 1
+        else:
+            released_header.append(clean_text(label))
+    w.writerow(released_header)
     for i, (row, (pid, days, age_width, coarse_geo)) in enumerate(zip(body, decisions)):
         before = Stats.transformations
         region = village_region(zip(header, row))
@@ -310,6 +325,10 @@ def process_json(data, is_fhir: bool, rel: str, records: list, lookup) -> str:
         cleaned = {}
         for source_key, values in data.items():
             output_key = clean_text(source_key)
+            if output_key != source_key and is_record_list(source_key, values):
+                # Indexed locators refer to the original keys. Quarantine rather
+                # than publishing a locator that reproduces a sensitive key.
+                raise Quarantine("sensitive_record_locator")
             stem, index = output_key, 2
             while output_key in cleaned:
                 output_key = f"{stem}_{index}"
@@ -355,8 +374,10 @@ def process_text(text: str, rel: str, records: list, lookup) -> str:
     Stats.identifiers += removed
     text, removed = redact_encounter(text)
     Stats.identifiers += removed
+    month_first = infer_date_order([text]) if days else None
+    text = hide_unshiftable_birth_dates(text, days, month_first)
     if days:
-        text = shift_dates(text, days, month_first=infer_date_order([text]))
+        text = shift_dates(text, days, month_first=month_first)
     cleaned = clean_text(text)
     return f"Patient: {pid}\n{cleaned}" if pid else cleaned
 

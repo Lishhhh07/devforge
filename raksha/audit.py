@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 import re
 
-from raksha.detection import identifier_kind
+from raksha.detection import identifier_kind, is_coarse_location, is_lower_region
 from raksha.release import _pointer
 
 
@@ -31,6 +31,7 @@ def profile_uniqueness(output):
             by_file[item["file"]].append(item)
 
     ages, districts = defaultdict(set), defaultdict(set)
+    released_regions = defaultdict(set)
     patients = set()
     sanitized = (output / "sanitized").resolve()
     for name, items in by_file.items():
@@ -58,17 +59,29 @@ def profile_uniqueness(output):
                 value = " ".join(value.casefold().split())
                 if identifier_kind(label) == "AGE" and re.fullmatch(r"\d{1,3}(?:-\d{1,3}|\+)", value):
                     ages[item["patient"]].add(value)
-                elif label.casefold() in {"district", "jila", "जिला"} and value and "[" not in value:
-                    districts[item["patient"]].add(value)
+                elif is_coarse_location(label) and value and "[" not in value:
+                    patient = item["patient"]
+                    level = "local" if is_lower_region(label) else "broad"
+                    released_regions[patient].add((level, value))
+                    if label.casefold() in {"district", "jila", "जिला"}:
+                        districts[patient].add(value)
 
     signatures = Counter(
         (frozenset(ages[patient]), frozenset(districts[patient]))
         for patient in ages.keys() & districts.keys()
     )
+    released_signatures = Counter(
+        (frozenset(bands), frozenset(released_regions[patient]))
+        for patient, bands in ages.items()
+    )
     return {
         "linked_profiles": len(patients),
         "profiles_with_age_band_and_district": sum(signatures.values()),
         "unique_profiles_in_covered_subset": sum(size == 1 for size in signatures.values()),
+        "profiles_with_published_age_band": sum(released_signatures.values()),
+        "unique_profiles_on_published_age_and_region": sum(
+            size == 1 for size in released_signatures.values()
+        ),
     }
 
 

@@ -103,7 +103,7 @@ endobj
 endobj
 11 0 obj
 <<
-/Length 5197
+/Length 5205
 >>
 stream
 1 0 0 1 0 0 cm
@@ -221,7 +221,7 @@ BT
 1 0 0 1 0 3.3 Tm
 /F1 9.2 Tf
 12.5 TL
-(99 \057 3\054230 annotated items \0503\0561\045\051\056 Latin 3\0560\045\054 Devanagari 0\045\054 Hinglish 8\0561\045\056) Tj
+(14 \057 3\054230 annotated items \0500\0564\045\051\056 Latin 0\0564\045\054 Devanagari 0\045\054 Hinglish 2\0567\045\056) Tj
 T*
 ET
 Q
@@ -257,7 +257,7 @@ BT
 1 0 0 1 0 3.3 Tm
 /F1 9.2 Tf
 12.5 TL
-(0 \057 4 canaries found\056 4\054855 \057 4\054855 medical probes retained\056) Tj
+(0 \057 4 canaries\056 4\054827 \057 4\054855 probes retained\056 All 28 changes were district fields\056) Tj
 T*
 ET
 Q
@@ -364,11 +364,11 @@ BT
 1 0 0 1 0 32.2 Tm
 /F1 10.4 Tf
 14.2 TL
-(28 of 44 covered pseudonym profiles \05063\0566\045\051 were unique on their combined structured age bands and) Tj
+(8 of 44 age\055covered profiles were unique on age bands and published geography\054 down from 33 of 44\056) Tj
 T*
-(districts\056 The release contained 66 linked profiles\056 This measures within\055release uniqueness on two fields\056) Tj
+(The release contained 66 linked profiles\056 A withheld region counts as absent in the profile signature\056) Tj
 T*
-(External matching\054 free text\054 unlinked records and other quasi\055identifiers are outside its coverage\056) Tj
+(The measure excludes free text\054 external matching\054 unlinked records and other quasi\055identifiers\056) Tj
 T*
 ET
 Q
@@ -461,7 +461,7 @@ xref
 0000003153 00000 n 
 0000003258 00000 n 
 0000003449 00000 n 
-0000008699 00000 n 
+0000008707 00000 n 
 trailer
 <<
 /Size 13
@@ -470,5 +470,5 @@ trailer
 /ID [ <6b03582e40dac45076f62cc31b0926eb> <6b03582e40dac45076f62cc31b0926eb> ]
 >>
 startxref
-9039
+9047
 %%EOF

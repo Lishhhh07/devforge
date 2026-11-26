@@ -71,3 +71,11 @@ The held-out synthetic regression uses a separate, generated input bundle withou
 Protected full-name and phone claims now attach ID-less records only to a unique, independently anchored group. The release planner can withhold structured district, tehsil and village fields when profiles with the same explicit broader region gain comparison peers. Independent end-to-end tests verified these actions, conflicting-claim handling, retained medication values and consistent dates.
 
 The organizer ZIP returned `CONTRACT OK`. Contextual address, admission ID, insurance ID and PIN rules reduced practice leaks to 99 of 3,230 (3.1%). All 4,855 clinical probes survived and no planted canaries were found. Practice linkage held at 1.00 precision and 0.56 recall. The structured age-and-district uniqueness indicator remained 28 of 44 covered profiles.
+
+## Privacy hardening and independent cohort
+
+Three runs on the organizer ZIP passed `CONTRACT OK`. Input hashes were unchanged. The same secret produced byte-identical exports and record indexes, and a second secret changed the release. The checker found 14 of 3,230 annotated items (0.4%) and zero planted canaries. It retained 4,827 of 4,855 preservation probes. The 28 changes were district fields withheld by the privacy policy. No clinical probe was lost. Linkage held at 1.00 precision and 0.56 recall.
+
+On the same covered set of 44 linked profiles with a published age band, uniqueness on age band and remaining structured geography dropped from 33 to 8. Withheld geography counts as absent in the signature, so the sample size is held fixed. This comparison excludes dates, unlinked profiles, free text and external data.
+
+The independent generated cohort covers 240 distinct synthetic patients in 480 files with multiple encodings and header styles. It checks within-profile linkage, profile separation, absence of the generated identifiers and preserved clinical values. Smaller adversarial fixtures cover conflicting identifiers, protected record locators, offline execution, key rotation and malformed data. These tests exercise general rules and scale beyond the organizer kit. They do not model all distributions in the hidden evaluation.

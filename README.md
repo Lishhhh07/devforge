@@ -15,7 +15,7 @@ PowerShell users can set the secret with `$env:RAKSHA_SECRET = 'practice'` befor
 
 The pipeline writes UTF-8 exports under `out/sanitized/`, a per-file SHA-256 manifest in `out/report.json`, and the record index in `out/records.jsonl`. Quarantined files appear in the manifest with a fixed reason code and no export.
 
-`python -m unittest discover -s tests -v` runs the independent synthetic release regression. It blocks Python socket operations and checks unfamiliar input encodings and field widths, date handling, input integrity, secret rotation, quarantine and pseudonym collision handling. The runtime has no trained model, persistent name dictionary, or dependency on organizer data. The name matcher collects evidence only from each worker's input for the current run.
+`python -m unittest discover -s tests -v` runs independent synthetic release regressions, including a generated 480-file, 240-patient cohort. A separate offline fixture blocks Python socket operations and checks unfamiliar input encodings and field widths, date handling, input integrity, secret rotation, quarantine and pseudonym collision handling. The runtime has no trained model, persistent name dictionary, or dependency on organizer data. The name matcher collects evidence only from each worker's input for the current run.
 
 ```bash
 python ../Secret-Wards/validate_output.py --input ../Secret-Wards/dev/input --output out
@@ -38,7 +38,7 @@ The worker checks rendered exports against the explicitly identified hospital ID
 ## P0 architecture workflow
 
 1. Keep the published identity graph separate from the hospital-local timeline graph. An exact qualified encounter ID can preserve an interval across files without assigning a patient pseudonym. Conflicting patient evidence blocks encounter-level inheritance.
-2. Plan the release from proposed profile values. The planner widens age bands when profiles gain comparison peers. It can also withhold structured district and tehsil fields when that adds peers with the same explicit state or country evidence. Workers apply revisions before rendering. The assembler stages their outputs in memory and verifies file accounting, output mappings and record locators before writing. Free-text geography and profile signatures with no explicit broader region do not use the geography escalation.
+2. Plan the release from proposed profile values. The planner can widen age bands and withhold structured lower geography for small cohorts that gain peers. With no explicit broader region, a revision that withholds geography requires a resulting cohort at or above the configured minimum. Workers apply revisions before rendering. The assembler verifies file accounting, output mappings and record locators before writing. Free-text geography is outside this cohort calculation.
 3. Verify each change with a targeted fixture, the toolkit contract validator and the practice privacy, utility and linkage checks. Verify deterministic output before expanding the planner to more generalisation rules.
 
 `config/policy.yaml` holds your privacy settings (age band width, date shift range, minimum group size).

@@ -76,7 +76,7 @@ def plan_release_fields(candidates, width, min_group_size):
             target.update(values)
     signatures = {}
     for patient, (ages, places, parents) in profiles.items():
-        if ages and places and parents:
+        if ages:
             size = 2 * width if patient in widened else width
             signatures[patient] = (
                 size, frozenset(age // size * size for age in ages), frozenset(places), frozenset(parents),
@@ -84,15 +84,61 @@ def plan_release_fields(candidates, width, min_group_size):
     counts = Counter(signatures.values())
     options = defaultdict(set)
     for patient, signature in signatures.items():
-        size, ages, _, parents = signature
-        if counts[signature] < min_group_size:
+        size, ages, places, parents = signature
+        if places and parents and counts[signature] < min_group_size:
             options[size, ages, parents].add(patient)
     coarse = {
         patient for group in options.values() for patient in group
         if len(group) > counts[signatures[patient]]
     }
-    return {patient: (2 * width if patient in widened else None, patient in coarse)
-            for patient in widened | coarse}
+
+    # When no explicit broader region exists, withhold lower geography only if
+    # the *resulting* age-band cohort meets the configured minimum.
+    no_parent_options = defaultdict(set)
+    for patient, (size, ages, places, parents) in signatures.items():
+        if not parents and counts[signatures[patient]] < min_group_size:
+            no_parent_options[size, ages].add(patient)
+    for group in no_parent_options.values():
+        if len(group) >= min_group_size:
+            coarse.update(patient for patient in group if profiles[patient][1])
+
+    revisions = {patient: (2 * width if patient in widened else None, patient in coarse)
+                 for patient in widened | coarse}
+
+    # Consider a wider age band only when a complete cohort can reach the
+    # minimum without further changing its remaining geography.
+    wider_options = defaultdict(set)
+    final = {}
+    for patient, (size, ages, places, parents) in signatures.items():
+        if patient in coarse:
+            places = frozenset()
+        final[patient] = (size, ages, places, parents)
+    final_counts = Counter(final.values())
+    for patient, (size, ages, places, parents) in final.items():
+        if final_counts[final[patient]] < min_group_size:
+            max_width = 4 * width
+            broader = frozenset(age // max_width * max_width for age in ages)
+            wider_options[broader, places, parents].add(patient)
+    for group in wider_options.values():
+        if len(group) >= min_group_size:
+            for patient in group:
+                revisions[patient] = (4 * width, patient in coarse)
+
+    # Try the combined revision last. It must form a full-sized group of
+    # candidates with compatible published age bands and broader locations.
+    combined = defaultdict(set)
+    for patient, (size, ages, places, parents) in signatures.items():
+        if final_counts[final[patient]] >= min_group_size:
+            continue
+        if revisions.get(patient, (None, False))[0] == 4 * width:
+            continue
+        broader = frozenset(age // (4 * width) * (4 * width) for age in ages)
+        combined[broader, parents].add(patient)
+    for group in combined.values():
+        if len(group) >= min_group_size:
+            for patient in group:
+                revisions[patient] = (4 * width, bool(profiles[patient][1]))
+    return revisions
 
 
 def _contains_patient(value, patient):

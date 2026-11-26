@@ -15,6 +15,7 @@ from unittest.mock import patch
 from main import resolve
 from raksha.distributed import identity_groups
 from raksha.linkage import corroborating_identity
+from raksha.release import plan_release_fields
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,6 +27,13 @@ def snapshot(root):
 
 
 class TrackThreeTest(unittest.TestCase):
+    def test_combined_privacy_revision_requires_a_complete_comparison_cohort(self):
+        candidates = [(str(i), (age,), (f"place-{i}",), ())
+                      for i, age in enumerate((25, 30, 35, 25, 30))]
+        self.assertEqual(plan_release_fields(candidates[:-1], 5, 5), {})
+        self.assertEqual(plan_release_fields(candidates, 5, 5),
+                         {str(i): (20, True) for i in range(5)})
+
     def test_cross_worker_fragment_and_geography_revision(self):
         with tempfile.TemporaryDirectory(dir=ROOT) as directory:
             workspace = Path(directory)
@@ -118,6 +126,9 @@ class TrackThreeTest(unittest.TestCase):
             (inputs / "records.json").write_text('{"value":NaN}', encoding="utf-8")
             (inputs / "visit.json").write_text('{"result":1e999}', encoding="utf-8")
             (inputs / "report.json").write_text('{"result":1,"result":2}', encoding="utf-8")
+            (inputs / "results.json").write_text(
+                '{"patient-contact@example.invalid":[{"value":"5 mg"}]}', encoding="utf-8",
+            )
             before = snapshot(inputs)
             same_secret = []
             linked_values = []
@@ -134,7 +145,8 @@ class TrackThreeTest(unittest.TestCase):
                 self.assertNotIn(secret, process.stdout)
                 files = json.loads((out / "report.json").read_bytes())["files"]
                 reasons = sorted(item["reason"] for item in files if item["status"] == "quarantined")
-                self.assertEqual(reasons, ["duplicate_json_field", "invalid_json_number", "invalid_json_number"])
+                self.assertEqual(reasons, ["duplicate_json_field", "invalid_json_number",
+                                           "invalid_json_number", "sensitive_record_locator"])
                 with (out / "sanitized/arogya_registration.tsv").open(encoding="utf-8", newline="") as stream:
                     header, row = csv.reader(stream, delimiter="\t")
                 self.assertEqual(len(header), len(row))
@@ -144,6 +156,7 @@ class TrackThreeTest(unittest.TestCase):
                 self.assertEqual((discharge - admission).days, 9)
                 linked_values.append((row[0], admission))
                 published = (out / "records.jsonl").read_text(encoding="utf-8")
+                self.assertNotIn("patient-contact@example.invalid", published)
                 records = [json.loads(line) for line in published.splitlines()]
                 self.assertEqual(sum(record["patient"] is None for record in records), 2)
                 texts = [(out / record["file"]).read_text(encoding="utf-8")

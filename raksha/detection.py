@@ -23,13 +23,13 @@ _FIELDS = {
     "PAN": ("pan", "pan no", "pan number"),
     "INSURANCE_ID": ("insurance id", "insurance no", "insurance number", "policy no",
                      "policy number", "member id", "pmjay id", "insurance member id"),
-    "ADDRESS": ("address", "street", "house", "house no", "landmark", "locality", "pata",
+    "ADDRESS": ("address", "address note", "postal address", "street", "house", "house no", "landmark", "locality", "pata",
                 "पता", "मकान", "मकान नंबर", "मोहल्ला"),
     "SOURCE_PATH": ("source path", "original filename", "source filename"),
     "ENCOUNTER": ("encounter id", "encounter ref"),
     "AGE": ("age", "age years", "umar", "उम्र"),
     "PIN": ("pin", "pin code", "zipcode", "zip", "postal code", "पिन"),
-    "VILLAGE": ("village", "village mohalla", "gaon", "gram", "गाँव", "गांव", "ग्राम"),
+    "VILLAGE": ("village", "village mohalla", "city", "gaon", "gram", "गाँव", "गांव", "ग्राम"),
     "DOB": ("dob", "dob mm dd yyyy", "dob dd mm yyyy", "date of birth", "birth date",
             "janm tithi", "जन्म तिथि"),
 }
@@ -95,6 +95,7 @@ _HONORIFIC_NAME = re.compile(
 )
 _CLINICAL_POSSESSOR = re.compile(
     rf"(?<![\w.\u0900-\u097f])({_NAME_WORD}(?:[ \t]+{_NAME_WORD}){{0,2}})"
+    r"(?:[ \t]+[a-z]{2,12})?"
     r"(?=[ \t]+(?i:ka|ki|ke)[ \t]+(?i:BP|pulse|spo2|temp(?:erature)?|"
     r"sugar|glucose|report|tabiyat|ilaaj)\b)"
 )
@@ -118,8 +119,25 @@ _HINDI_SYMPTOM_SUBJECT = re.compile(
     r"(?=[ \t]+को[ \t]+\d{1,3}[ \t]+(?:दिन|घंटे|हफ्ते|सप्ताह)[ \t]+से)"
 )
 _ADDRESS_LINE = re.compile(r"(?im)^([ \t]*(?:पता|address|postal address|patient address)"
+                           r"(?:[ \t]+\([a-z -]{1,24}\))?"
                            r"[ \t]*:[ \t]*)([^\r\n]+)")
 _COARSE_ADDRESS_PART = re.compile(r"(?i)^(?:तहसील|जिला|ज़िला|district|tehsil|tahsil)(?=[ \t:=])")
+_RELATIVE_SOURCE_NAME = re.compile(
+    rf"(\b(?i:from)[ \t]+)({_NAME_WORD}(?:[ \t]+{_NAME_WORD}){{0,3}})"
+    r"(?=['’]s[ \t]+[^\r\n()]{1,40}\([SDWsdw]/[Oo][ \t]+)"
+)
+_NOTE_SUBJECT = re.compile(
+    rf"(?m)^([ \t]*(?:[01]\d|2[0-3]):[0-5]\d[ \t]+[-–][ \t]+)"
+    rf"({_NAME_WORD}(?:[ \t]+{_NAME_WORD}){{0,3}})"
+    r"(?=[ \t]+[-–][ \t]+(?i:K/C/O|C/O|BP|pulse)\b)"
+)
+_FAMILY_SUBJECT = re.compile(
+    rf"(?m)^([ \t]*)({_NAME_WORD}(?:[ \t]+{_NAME_WORD}){{1,3}})"
+    r"(?=[ \t]*,[ \t]*[SDWsdw]/[Oo]\b)"
+)
+_IDENTIFYING_HEADER = re.compile(
+    rf"[A-Z]{{2,}}[A-Z0-9/-]*\d{{3,}}[ \t]+{_NAME_WORD}(?:[ \t]+{_NAME_WORD}){{1,3}}"
+)
 _LABELLED_PIN = re.compile(r"(?i)(\b(?:pin(?:[ \t]+code)?|post[ \t]*code)[ \t]*[:=]?[ \t]*)"
                            r"(\d{3})\d{3}(?!\d)")
 _ADDRESS_PIN = re.compile(r"(?<!\d)(\d{3})\d{3}(?!\d)")
@@ -152,7 +170,8 @@ def redact_contextual_names(text):
         count += 1
         return "[NAME]"
 
-    for pattern in (_EXPLICIT_NAME, _LAB_REPORT_NAME, _TIMESTAMPED_AUTHOR, _HINDI_SYMPTOM_SUBJECT):
+    for pattern in (_EXPLICIT_NAME, _LAB_REPORT_NAME, _TIMESTAMPED_AUTHOR,
+                    _HINDI_SYMPTOM_SUBJECT, _RELATIVE_SOURCE_NAME, _NOTE_SUBJECT, _FAMILY_SUBJECT):
         text = pattern.sub(replace_explicit, text)
     for pattern in (_HONORIFIC_NAME, _CLINICAL_POSSESSOR):
         text = pattern.sub(replace_honorific, text)
@@ -177,6 +196,10 @@ def redact_contextual_names(text):
     text, pins = _LABELLED_PIN.subn(r"\1\2***", text)
     count += pins
     return text, count
+
+
+def identifying_header(label: str) -> bool:
+    return _IDENTIFYING_HEADER.fullmatch(label.strip()) is not None
 
 
 _NAME_TOKEN = re.compile(
