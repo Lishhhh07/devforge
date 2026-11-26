@@ -51,3 +51,5 @@ The next contextual detection pass added labelled Hindi patient and guardian nam
 Worker-local exact name matching reduced the remaining count to 375 of 3,230 without exposing the name lists through IPC. The assembler now checks the exact output record associated with each indexed pseudonym. Two practice runs passed the contract and produced identical sanitised files and record indexes. All 4,855 medical probes survived, and the checker found no planted canaries.
 
 Hindi address and relative labels, Devanagari-digit phone matching and clinical-context possessive patterns reduced the remaining count to 290 of 3,230. The Devanagari leak rate fell from 62.9% to 32.2%. Hinglish leakage held at 46.8%. The contract passed, every medical probe survived and no canaries were found.
+
+Lab report headers, timestamped message authors and additional Hinglish honorifics reduced Hinglish leakage from 46.8% to 8.1%. Overall leakage fell to 244 of 3,230. The contract passed, all 4,855 medical probes survived, no canaries were found and linkage held at 1.00 precision and 0.56 recall.

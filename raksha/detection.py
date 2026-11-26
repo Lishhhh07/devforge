@@ -83,7 +83,8 @@ _EXPLICIT_NAME = re.compile(
 )
 _HONORIFIC_NAME = re.compile(
     rf"(?<![\w.\u0900-\u097f])({_NAME_WORD}(?:[ \t]+{_NAME_WORD}){{0,2}})"
-    r"(?=[ \t]+(?i:ji|sahab|saheb|didi|behenji|bhaiya)[ \t]+(?i:ka|ki|ke|ne|ko)\b)"
+    r"(?=[ \t]+(?i:ji|sahab|saheb|saab|didi|behenji|bhaiya|bhai|babu)"
+    r"[ \t]+(?i:ka|ki|ke|ne|ko)\b)"
 )
 _CLINICAL_POSSESSOR = re.compile(
     rf"(?<![\w.\u0900-\u097f])({_NAME_WORD}(?:[ \t]+{_NAME_WORD}){{0,2}})"
@@ -93,6 +94,17 @@ _CLINICAL_POSSESSOR = re.compile(
 _HINDI_LOCATION = re.compile(
     r"(?m)(?<![\w\u0900-\u097f])(पता|ग्राम|गाँव|गांव|मोहल्ला|मकान(?: नंबर)?)"
     r"([ \t]*[:=][ \t]*)([^\r\n,;|]+)"
+)
+_LAB_REPORT_NAME = re.compile(
+    rf"(?m)^([ \t]*(?i:(?:lab[ \t]+)?report[ \t]+(?:of|for))[ \t]+)"
+    rf"({_NAME_WORD}(?:[ \t]+{_NAME_WORD}){{0,3}})"
+    r"(?=[ \t]+(?:(?i:ji|didi|sahab|behenji|bhai|babu)[ \t]+)?"
+    r"\d{1,3}[ \t]*(?i:y|yr|yrs|years?)[ \t]*/[ \t]*(?i:m|f)\b)"
+)
+_TIMESTAMPED_AUTHOR = re.compile(
+    rf"(?m)^([ \t]*\[\d{{1,4}}[/-]\d{{1,2}}[/-]\d{{1,4}},[ \t]*"
+    rf"\d{{1,2}}:[0-5]\d(?:[ \t]*(?i:am|pm))?\][ \t]*)"
+    rf"({_NAME_WORD}(?:[ \t]+{_NAME_WORD}){{1,3}})(?=[ \t]*:[ \t]+)"
 )
 _CLINICIAN_PREFIX = re.compile(r"(?i)(?:\bdr\.?|\bdoctor|डॉ\.?)\s*$")
 _CLINICAL_WORDS = frozenset({
@@ -119,7 +131,8 @@ def redact_contextual_names(text):
         count += 1
         return "[NAME]"
 
-    text = _EXPLICIT_NAME.sub(replace_explicit, text)
+    for pattern in (_EXPLICIT_NAME, _LAB_REPORT_NAME, _TIMESTAMPED_AUTHOR):
+        text = pattern.sub(replace_explicit, text)
     for pattern in (_HONORIFIC_NAME, _CLINICAL_POSSESSOR):
         text = pattern.sub(replace_honorific, text)
     text, location_count = _HINDI_LOCATION.subn(r"\1\2[ADDRESS]", text)
