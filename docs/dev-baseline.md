@@ -55,3 +55,11 @@ Hindi address and relative labels, Devanagari-digit phone matching and clinical-
 Lab report headers, timestamped message authors and additional Hinglish honorifics reduced Hinglish leakage from 46.8% to 8.1%. Overall leakage fell to 244 of 3,230. The contract passed, all 4,855 medical probes survived, no canaries were found and linkage held at 1.00 precision and 0.56 recall.
 
 Hindi symptom-subject recognition and address-line redaction reduced the remaining practice leaks to 198 of 3,230. No annotated Devanagari leaks were found, down from 32.2%. The contract passed, all 4,855 medical probes survived and no canaries were found. Linkage held at 1.00 precision and 0.56 recall.
+
+## Submission verification
+
+Three runs on the original 200-file organizer ZIP returned `CONTRACT OK`. Same-secret sanitized files and record indexes matched byte for byte. With a second secret, the patient pseudonym sets were disjoint in this run. The input SHA-256 snapshot was unchanged. All 19 exported bundles passed the official HL7 FHIR R4 JSON Schema and had previously passed the local reference check. JSON Schema validation does not cover all FHIR profiles and terminology requirements.
+
+The three Windows practice runs took 4.77-9.25 seconds wall-clock. Peak sampled aggregate process-tree RSS was 139.6 MiB. These measurements were collected locally with 30 ms sampling and without evaluator hardware limits.
+
+`python -m raksha.audit --output OUTPUT` measures within-release uniqueness for linked profiles with both a structured age band and a district. In this release, 28 of 44 covered profiles were unique (63.6%), out of 66 linked profiles total. This is a two-field risk indicator. It excludes unlinked records, free text and external reference datasets.

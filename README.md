@@ -2,25 +2,26 @@
 
 Ghee Khatam's submission for Yugaantar DevForge Track 3 builds on the organizer's MIT-licensed starter. It uses only the Python standard library and runs offline on CPU. See [the baseline notes](docs/dev-baseline.md) for setup, practice results and known privacy gaps.
 
-Copy this folder's contents to the root of **your own** repository and build from there.
+## Setup and run
+
+Use Python 3.10 or later. Run from the repository root. The input must be a directory, and the output must be empty or absent and outside the input tree.
 
 ```bash
-RAKSHA_SECRET=practice python3 main.py --input ../dev/input --output ../my_output
+python -m pip install -r requirements.txt
+RAKSHA_SECRET=practice python main.py --input ../Secret-Wards/dev/input --output out
 ```
 
-## What it already does right
+PowerShell users can set the secret with `$env:RAKSHA_SECRET = 'practice'` before invoking Python. The example secret is for synthetic practice data. The evaluator supplies its own secret. No models or network calls are used at runtime.
 
-| ✅ | Done for you |
-|---|---|
-| reads every file in a fixed order | deterministic output |
-| decodes UTF-8, UTF-8-BOM, UTF-16 and cp1252 | writes UTF-8 |
-| keeps CSV as CSV and JSON as JSON | same delimiter, header and structure |
-| quarantines PDF, images, XML, empty and broken JSON files | never copies them raw |
-| writes `report.json` | SHA-256 per file, honest counts, timing, memory |
-| writes `records.jsonl` | correct `row:N`, `/json/pointer` and `doc` locators |
-| `pseudonym()` | keyed HMAC fake IDs (`PSN-XXXXXX`) from `RAKSHA_SECRET` |
-| `date_shift_days()`, `shift_date()`, `age_band()` | per-patient date shifting and age bands |
-| prints only counts | stdout, stderr and logs are scanned for PII |
+The pipeline writes UTF-8 exports under `out/sanitized/`, a per-file SHA-256 manifest in `out/report.json`, and the record index in `out/records.jsonl`. Quarantined files appear in the manifest with a fixed reason code and no export.
+
+```bash
+python ../Secret-Wards/validate_output.py --input ../Secret-Wards/dev/input --output out
+python ../Secret-Wards/check_dev.py --output out
+python -m raksha.audit --output out
+```
+
+For scoring, use input unpacked directly from the organizer ZIP. Checkout line-ending conversions can change the truth hashes used to locate renamed files. The audit reports age-band and district uniqueness among indexed profiles with both fields. It emits aggregate counts only.
 
 ## Current privacy pipeline
 
@@ -39,3 +40,10 @@ The worker checks rendered exports against the explicitly identified hospital ID
 3. Verify each change with a targeted fixture, the toolkit contract validator and the practice privacy, utility and linkage checks. Verify deterministic output before expanding the planner to more generalisation rules.
 
 `config/policy.yaml` holds your privacy settings (age band width, date shift range, minimum group size).
+
+
+## Security and limitations
+
+The coordinator receives keyed linkage tokens. Hospital workers keep input records and matching evidence in process memory, and the assembler keeps candidate exports in memory until its structural checks pass. Raw input is opened read-only, and the CLI writes aggregate counts or fixed error codes. Evaluation uses synthetic inputs. At-rest protection for source and output files on real deployments belongs to the host or storage layer and is outside this implementation.
+
+The workers share an OS account in the competition runtime, so the local process boundary limits normal data exchange. It supplies no protection against a compromised host. The practice audit covers structured age and district fields only. Hidden formats, unindexed records and other quasi-identifiers can expose additional risk. See the [two-page project brief](docs/project-brief.pdf) and [practice verification](docs/dev-baseline.md).
