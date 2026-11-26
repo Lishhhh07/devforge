@@ -28,7 +28,9 @@ The CLI routes known sources to hospital workers and sends other sources to an u
 
 Structured labels and free-text patterns drive redaction. File paths use keyed tokens. Linked records carry the same pseudonym in the output and the record index, and their recognized dates use a consistent per-patient offset. Explicit age and PIN fields become age bands and PIN prefixes.
 
-Workers generalise structured village fields to an explicit tehsil or district from the record, and withhold the village when neither is reliable. For recognised non-FHIR JSON attachments, they clear opaque inline payloads and retain the surrounding record. Work remains on hospital routing for unfamiliar layouts, multilingual free-text coverage, FHIR references and attachments, and a release-wide leak gate. Run the toolkit's practice checker against the original ZIP data so its truth hashes match renamed outputs.
+Workers generalise structured village fields to an explicit tehsil or district from the record, and withhold the village when neither is reliable. For recognised non-FHIR JSON attachments, they clear opaque inline payloads and retain the surrounding record. The FHIR writer regenerates Bundle entry URLs and resource IDs together, rewrites local references and withholds attachment payloads. It quarantines unresolved references and unsupported contained resources. CSV exports preserve the column count and put a linked pseudonym in an existing identifier column. Recognised safe path components are retained and uncertain path components are keyed.
+
+The worker checks rendered exports against the explicitly identified hospital IDs it extracted locally. Work remains on broader residual-PII checks, multilingual free-text coverage, full FHIR R4 conformance testing and routing for unfamiliar layouts. Run the toolkit's practice checker against the original ZIP data so its truth hashes match renamed outputs.
 
 ## P0 architecture workflow
 

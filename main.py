@@ -36,6 +36,7 @@ from pathlib import Path
 from raksha.dates import infer_date_order, shift_dates
 from raksha.detection import identifier_kind, is_coarse_location, village_region
 from raksha.distributed import coordinate, identity_groups, linkage_token, partition
+from raksha.fhir import patient_evidence, rewrite_bundle
 from raksha.ingestion import Quarantine, parse
 from raksha.linkage import patient_key, redact_labelled_ids, shared_identity
 from raksha.release import age_value, plan_age_bands, proposed_profile_fields
@@ -120,6 +121,15 @@ PATTERNS = [
         r"(?im)(?<=^)([ \t]*(?:patient[ \t]+name|relative[ \t]+name|"
         r"guardian[ \t]+name|naam|नाम|name)[ \t]*:[ \t]*)[^\r\n,;|]+"
     )),
+    ("NAME", re.compile(
+        r"(?m)^([ \t]*(?:[01]\d|2[0-3]):[0-5]\d[ \t]*[-–][ \t]*)"
+        r"[A-Z][\w.'’-]*(?:[ \t]+[A-Z][\w.'’-]*){0,3}"
+        r"(?=[ \t]*\((?i:attendant|visitor|guardian|relative)\b)"
+    )),
+    ("NAME", re.compile(
+        r"(\b(?i:called by)[ \t]+)[A-Z][\w.'’-]*(?:[ \t]+[A-Z][\w.'’-]*){0,3}"
+        r"(?=[ \t]+(?:\[PHONE\]|\+?\d))"
+    )),
     ("RELATIVE", re.compile(
         r"(?m)(\b(?:[SDWsdw]/[Oo]|पुत्र|पुत्री|पत्नी)[ \t]+)"
         r"[^\W\d_][\w\u0900-\u097f.'’-]*(?:[ \t]+"
@@ -135,6 +145,10 @@ class Stats:
     generalized = 0
     suppressed = 0
     transformations = 0
+    known_ids = frozenset()
+
+
+_ID_WORD = re.compile(r"(?<![\w/-])[A-Z]{2,}[A-Z0-9/-]*\d{3,}(?![\w/-])", re.IGNORECASE)
 
 
 def clean_text(text: str) -> str:
@@ -143,6 +157,14 @@ def clean_text(text: str) -> str:
         replacement = rf"\1[{kind}]" if kind in {"NAME", "RELATIVE"} else f"[{kind}]"
         text, n = rx.subn(replacement, text)
         Stats.identifiers += n
+    def redact_known_id(match):
+        if match[0].upper() in Stats.known_ids:
+            Stats.identifiers += 1
+            return "[MRN]"
+        return match[0]
+
+    if Stats.known_ids:
+        text = _ID_WORD.sub(redact_known_id, text)
     return text
 
 
@@ -218,14 +240,13 @@ def process_csv(rows: list[list[str]], delimiter: str, rel: str, records: list, 
     w = csv.writer(buf, delimiter=delimiter, lineterminator="\n")
     kinds = [identifier_kind(label) for label in header]
     decisions = [lookup(dict(zip(header, row))) for row in body]
-    linked = any(pid for pid, _, _ in decisions)
     orders = [
         True if "mm/dd" in label.casefold() else
         False if "dd/mm" in label.casefold() else
         infer_date_order(row[index] for row in body if index < len(row))
         for index, label in enumerate(header)
     ]
-    w.writerow((["raksha_patient"] if linked else []) + [clean_text(label) for label in header])
+    w.writerow([clean_text(label) for label in header])
     for i, (row, (pid, days, age_width)) in enumerate(zip(body, decisions)):
         before = Stats.transformations
         region = village_region(zip(header, row))
@@ -234,7 +255,14 @@ def process_csv(rows: list[list[str]], delimiter: str, rel: str, records: list, 
                         month_first=orders[index] if index < len(orders) else None, region=region)
             for index, cell in enumerate(row)
         ]
-        w.writerow(([pid or ""] if linked else []) + cleaned)
+        if pid:
+            slot = next((index for index, (kind, cell) in enumerate(zip(kinds, row))
+                         if kind == "MRN" and cell.strip()), None)
+            if slot is None:
+                pid = None
+            else:
+                cleaned[slot] = pid
+        w.writerow(cleaned)
         Stats.generalized += Stats.transformations > before
         records.append({"file": f"sanitized/{rel}", "loc": f"row:{i}", "patient": pid})
         Stats.records += 1
@@ -243,6 +271,14 @@ def process_csv(rows: list[list[str]], delimiter: str, rel: str, records: list, 
 
 
 def process_json(data, is_fhir: bool, rel: str, records: list, lookup) -> str:
+    if is_fhir:
+        pid, days, _ = lookup(patient_evidence(data))
+        key = hmac.digest(release_key(b"fhir"), rel.encode("utf-8"), "sha256")
+        cleaned = rewrite_bundle(
+            data, key, clean_text, pid, lambda value: shift_dates(value, days) if days else value,
+        )
+        records.append({"file": f"sanitized/{rel}", "loc": "doc", "patient": pid})
+        return json.dumps(cleaned, ensure_ascii=False, indent=2) + "\n"
     is_doc = is_fhir or not isinstance(data, dict) or not any(
         is_record_list(label, value) for label, value in data.items()
     )
@@ -276,7 +312,6 @@ def process_json(data, is_fhir: bool, rel: str, records: list, lookup) -> str:
                     values, identifier_kind(source_key),
                     attachment=source_key.casefold() in ATTACHMENT_FIELDS,
                 )
-    # TODO(team): FHIR must stay a valid R4 Bundle whose references resolve
     return json.dumps(cleaned, ensure_ascii=False, indent=2) + "\n"
 
 
@@ -304,13 +339,32 @@ def process_text(text: str, rel: str, records: list, lookup) -> str:
     return f"Patient: {pid}\n{cleaned}" if pid else cleaned
 
 
+_SAFE_PATH_WORDS = set("""
+    admission arogya billing bundle census claims clean discharge dhh dhhardoi
+    distribution drug encounter export fhir formulary hardoi hospital input jeevanjyoti
+    lab legacy misc note notes nursing opd outpatient patient patients prescription
+    prescriptions protocol range ranges records reference registration report results
+    rx sanjeevani summary visit visits ward
+""".split())
+
+
+def safe_path_stem(stem: str) -> bool:
+    words = re.split(r"[_-]", stem.casefold())
+    return bool(words) and all(word in _SAFE_PATH_WORDS or re.fullmatch(r"[0-9]{1,4}", word)
+                               for word in words) and any(word in _SAFE_PATH_WORDS for word in words)
+
+
 def release_path(relative: Path, suffix: str) -> str:
     parts = []
-    for index in range(len(relative.parts)):
+    for index, part in enumerate(relative.parts):
+        is_file = index == len(relative.parts) - 1
+        stem = Path(part).stem if is_file else part
+        if safe_path_stem(stem) and (not is_file or Path(part).suffix.lower() == suffix):
+            parts.append(part)
+            continue
         source = "/".join(relative.parts[:index + 1]).encode("utf-8")
         token = hmac.digest(release_key(b"path"), source, "sha256").hex()[:24]
-        parts.append(token)
-    parts[-1] += suffix
+        parts.append(token + (suffix if is_file else ""))
     return "/".join(parts)
 
 
@@ -342,6 +396,8 @@ def evidence_records(doc):
             yield data
     elif doc.kind == "text":
         yield data
+    elif doc.kind == "fhir":
+        yield patient_evidence(data)
 
 
 def resolve(batches):
@@ -359,6 +415,7 @@ def release_revisions(candidates):
 def hospital_worker(connection, namespace, paths):
     try:
         evidence, documents = set(), []
+        known_ids = set()
         for index, path, relative in paths:
             raw = path.read_bytes()
             entry = {"input_sha256": hashlib.sha256(raw).hexdigest()}
@@ -372,11 +429,13 @@ def hospital_worker(connection, namespace, paths):
                 for record in evidence_records(doc):
                     key = patient_key(record)
                     if key:
+                        known_ids.add(key.split("|", 1)[1])
                         shared = shared_identity(record) if namespace != "unassigned" else None
                         evidence.add((linkage_token(SECRET, namespace, key),
                                       linkage_token(SECRET, "qualified", key),
                                       linkage_token(SECRET, "shared", shared) if shared else ""))
         connection.send(("evidence", evidence))
+        Stats.known_ids = frozenset(known_ids)
         decisions = connection.recv()
 
         def identity(record):
@@ -429,11 +488,16 @@ def hospital_worker(connection, namespace, paths):
                         text = process_json(doc.content, doc.kind == "fhir", rel, records, lookup)
                     else:
                         text = process_text(doc.content, rel, records, lookup)
+                    if any(match[0].upper() in Stats.known_ids for match in _ID_WORD.finditer(text)):
+                        raise Quarantine("residual_hospital_id")
                     result = text.encode("utf-8")
                     entry.update(output=f"sanitized/{rel}", status="sanitized")
                 except UnicodeError:
                     records.clear()
                     entry.update(output=None, status="quarantined", reason="unencodable_output")
+                except Quarantine as exc:
+                    records.clear()
+                    entry.update(output=None, status="quarantined", reason=str(exc))
             results.append((index, entry, result, records))
         connection.send(("release", (results, Stats.identifiers, Stats.generalized, peak_rss_mb())))
     except Exception:
@@ -451,7 +515,13 @@ def main() -> int:
         print("RAKSHA_SECRET is required", file=sys.stderr)
         return 2
     t0 = time.monotonic()
-    inp, out = Path(a.input), Path(a.output)
+    inp, out = Path(a.input).resolve(), Path(a.output).resolve()
+    if not inp.is_dir() or out == inp or inp in out.parents:
+        print("invalid_input_or_output", file=sys.stderr)
+        return 2
+    if out.exists() and (not out.is_dir() or any(out.iterdir())):
+        print("output_must_be_empty", file=sys.stderr)
+        return 2
     jobs = defaultdict(list)
     paths = sorted(p for p in inp.rglob("*") if p.is_file())
     for index, path in enumerate(paths):
