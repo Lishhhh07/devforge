@@ -45,3 +45,5 @@ Three runs on the original ZIP returned `CONTRACT OK`. Same-secret exports and r
 ## Format and leak-check checkpoint
 
 All three runs returned `CONTRACT OK`. CSV and TSV linked rows kept their original column counts and carried their pseudonyms in existing fields. The 19 practice FHIR Bundles retained resolvable internal references. The practice checker found 516 of 3,230 annotated items still visible, no planted canaries, and all 4,855 medical probes. Linkage was 1.00 precision, 0.56 recall and 0.87 F0.5 with zero false merges. Same-secret exports and record indexes were byte-identical. A different secret changed the release. Reference checks on these bundles do not establish full R4 schema conformance.
+
+The next contextual detection pass added labelled Hindi patient and guardian names and Hinglish honorific patterns with clinician and clinical-word guards. The contract passed, 415 of 3,230 annotated items remained visible and the checker found no planted canaries. All 4,855 medical probes survived, and the linkage metrics held. Remaining exposure was higher in Devanagari and Hinglish than in Latin text.

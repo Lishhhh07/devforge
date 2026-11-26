@@ -6,7 +6,8 @@ _FIELDS = {
     "NAME": (
         "name", "patient name", "patients name", "full name", "first name", "last name",
         "given name", "family name", "naam", "नाम", "relative name", "guardian",
-        "guardian name", "attendant name", "pita pati ka naam",
+        "guardian name", "attendant name", "pita pati ka naam", "मरीज का नाम",
+        "मरीज़ का नाम", "रोगी का नाम", "अभिभावक का नाम",
     ),
     "MRN": (
         "uhid", "mrn", "patient id", "patient ref", "reg no", "registration no",
@@ -65,3 +66,45 @@ def village_region(fields) -> str | None:
             ):
                 choices[rank].add(region)
     return next((next(iter(values)) for values in choices.values() if len(values) == 1), None)
+
+
+_HINDI_NAME = r"[\u0904-\u0939][\u0900-\u097f]*"
+_LATIN_NAME = r"[A-Z][a-z]+(?:[.'’-][A-Za-z]+)*"
+_NAME_WORD = rf"(?:{_LATIN_NAME}|{_HINDI_NAME})"
+_EXPLICIT_NAME = re.compile(
+    rf"(?m)^([ \t]*(?:(?i:patient|pt\.?|attendant|guardian|mareez ka naam|"
+    rf"rogi ka naam)|मरी[ज़ज] का नाम|मरीज़ का नाम|रोगी का नाम|अभिभावक का नाम)"
+    rf"[ \t]*:[ \t]*)({_NAME_WORD}(?:[ \t]+{_NAME_WORD}){{0,3}})"
+)
+_HONORIFIC_NAME = re.compile(
+    rf"(?<![\w.\u0900-\u097f])({_NAME_WORD}(?:[ \t]+{_NAME_WORD}){{0,2}})"
+    r"(?=[ \t]+(?i:ji|sahab|saheb|didi|behenji|bhaiya)[ \t]+(?i:ka|ki|ke|ne|ko)\b)"
+)
+_CLINICIAN_PREFIX = re.compile(r"(?i)(?:\bdr\.?|\bdoctor|डॉ\.?)\s*$")
+_CLINICAL_WORDS = frozenset({
+    "bp", "pulse", "temp", "spo2", "k/c/o", "dose", "report",
+    "parkinson", "addison", "dengue", "fever", "diabetes", "asthma",
+})
+
+
+def redact_contextual_names(text):
+    count = 0
+
+    def replace_explicit(match):
+        nonlocal count
+        if any(word.casefold() in _CLINICAL_WORDS for word in match[2].split()):
+            return match[0]
+        count += 1
+        return match[1] + "[NAME]"
+
+    def replace_honorific(match):
+        nonlocal count
+        if (_CLINICIAN_PREFIX.search(text[max(0, match.start() - 16):match.start()])
+                or any(word.casefold() in _CLINICAL_WORDS for word in match[0].split())):
+            return match[0]
+        count += 1
+        return "[NAME]"
+
+    text = _EXPLICIT_NAME.sub(replace_explicit, text)
+    text = _HONORIFIC_NAME.sub(replace_honorific, text)
+    return text, count

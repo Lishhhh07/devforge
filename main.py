@@ -34,7 +34,7 @@ import time
 from pathlib import Path
 
 from raksha.dates import infer_date_order, shift_dates
-from raksha.detection import identifier_kind, is_coarse_location, village_region
+from raksha.detection import identifier_kind, is_coarse_location, redact_contextual_names, village_region
 from raksha.distributed import coordinate, identity_groups, linkage_token, partition
 from raksha.fhir import patient_evidence, rewrite_bundle
 from raksha.ingestion import Quarantine, parse
@@ -157,6 +157,8 @@ def clean_text(text: str) -> str:
         replacement = rf"\1[{kind}]" if kind in {"NAME", "RELATIVE"} else f"[{kind}]"
         text, n = rx.subn(replacement, text)
         Stats.identifiers += n
+    text, contextual_count = redact_contextual_names(text)
+    Stats.identifiers += contextual_count
     def redact_known_id(match):
         if match[0].upper() in Stats.known_ids:
             Stats.identifiers += 1
