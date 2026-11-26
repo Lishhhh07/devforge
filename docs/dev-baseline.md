@@ -63,3 +63,5 @@ Three runs on the original 200-file organizer ZIP returned `CONTRACT OK`. Same-s
 The three Windows practice runs took 4.77-9.25 seconds wall-clock. Peak sampled aggregate process-tree RSS was 139.6 MiB. These measurements were collected locally with 30 ms sampling and without evaluator hardware limits.
 
 `python -m raksha.audit --output OUTPUT` measures within-release uniqueness for linked profiles with both a structured age band and a district. In this release, 28 of 44 covered profiles were unique (63.6%), out of 66 linked profiles total. This is a two-field risk indicator. It excludes unlinked records, free text and external reference datasets.
+
+The held-out synthetic regression uses a separate, generated input bundle without practice fixtures. It blocks Python socket operations and verifies repeatability, changed pseudonyms and shifted dates with a second secret, exact clinical intervals, unchanged input hashes, mixed-encoding handling and explicit quarantine of duplicate JSON properties and non-finite numbers. A separate forced-collision test verifies that two patient groups receive distinct pseudonyms.

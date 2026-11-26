@@ -15,6 +15,8 @@ PowerShell users can set the secret with `$env:RAKSHA_SECRET = 'practice'` befor
 
 The pipeline writes UTF-8 exports under `out/sanitized/`, a per-file SHA-256 manifest in `out/report.json`, and the record index in `out/records.jsonl`. Quarantined files appear in the manifest with a fixed reason code and no export.
 
+`python -m unittest discover -s tests -v` runs the independent synthetic release regression. It blocks Python socket operations and checks unfamiliar input encodings and field widths, date handling, input integrity, secret rotation, quarantine and pseudonym collision handling. The runtime has no trained model, persistent name dictionary, or dependency on organizer data. The name matcher collects evidence only from each worker's input for the current run.
+
 ```bash
 python ../Secret-Wards/validate_output.py --input ../Secret-Wards/dev/input --output out
 python ../Secret-Wards/check_dev.py --output out

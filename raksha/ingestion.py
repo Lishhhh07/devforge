@@ -3,6 +3,7 @@
 import csv
 import io
 import json
+import math
 from dataclasses import dataclass
 
 
@@ -29,8 +30,21 @@ def decode(raw: bytes) -> str:
 
 
 def parse_json(text: str) -> Document:
+    def unique_fields(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise Quarantine("duplicate_json_field")
+            result[key] = value
+        return result
+
+    def reject_constant(_value):
+        raise Quarantine("invalid_json_number")
+
     try:
-        data = json.loads(text)
+        data = json.loads(text, object_pairs_hook=unique_fields, parse_constant=reject_constant)
+    except Quarantine:
+        raise
     except RecursionError:
         raise Quarantine("json_too_deep") from None
     except ValueError:
@@ -44,6 +58,8 @@ def parse_json(text: str) -> Document:
             pending.extend((value, depth + 1) for value in node.values())
         elif isinstance(node, list):
             pending.extend((value, depth + 1) for value in node)
+        elif isinstance(node, float) and not math.isfinite(node):
+            raise Quarantine("invalid_json_number")
     kind = "fhir" if isinstance(data, dict) and data.get("resourceType") == "Bundle" else "json"
     return Document(kind, data)
 

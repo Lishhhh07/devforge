@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Secret Wards starter: a correct *skeleton*, not a solution.
+"""Secret Wards offline de-identification pipeline.
 
 It already does the boring, contract-critical parts right:
   * walks every input file in a fixed order (deterministic output),
@@ -10,9 +10,6 @@ It already does the boring, contract-critical parts right:
   * writes records.jsonl with the right locators (row:N, /json/pointer, doc),
   * gives you keyed HMAC pseudonyms and per-patient date shifting helpers,
   * never prints, logs or stores personal data or RAKSHA_SECRET.
-
-What it does NOT do is the actual challenge. Search for "TODO(team)".
-As shipped it is roughly the "naive regex" level: it passes CONTRACT OK and scores low.
 
 Usage: python main.py --input <input dir> --output <empty output dir>
 Standard library only, Python 3.10+.
@@ -33,7 +30,7 @@ import sys
 import time
 from pathlib import Path
 
-from raksha.dates import infer_date_order, shift_dates
+from raksha.dates import column_date_orders, infer_date_order, shift_dates
 from raksha.detection import (
     identifier_kind, is_coarse_location, known_name_keys, redact_contextual_names,
     redact_known_names, village_region,
@@ -73,13 +70,16 @@ def release_key(purpose: bytes) -> bytes:
 _ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"  # Crockford base32: no I, L, O, U
 
 
-def pseudonym(patient_key: str) -> str:
+def pseudonym(patient_key: str, attempt: int = 0) -> str:
     """Stable, non-reversible ID: HMAC-SHA256 keyed with RAKSHA_SECRET (never a plain hash).
 
     Same key + same secret -> same ID in every file. A different secret -> a different ID.
     patient_key should be YOUR canonical identity for a cluster of records (see link_records).
     """
-    digest = hmac.digest(release_key(b"patient"), patient_key.encode("utf-8"), "sha256")
+    message = patient_key.encode("utf-8")
+    if attempt:
+        message += b"\x00" + str(attempt).encode("ascii")
+    digest = hmac.digest(release_key(b"patient"), message, "sha256")
     n = int.from_bytes(digest[:5], "big")
     code = "".join(_ALPHABET[(n >> (5 * i)) & 31] for i in range(6))
     return f"PSN-{code}"
@@ -106,7 +106,6 @@ def age_band(age: int, width: int | None = None) -> str:
 
 
 # --------------------------------------------------------------------------- detection
-# TODO(team): this is the part that wins or loses the event. Ideas, in rough order of value:
 #   * column-aware rules: a column named like a name/phone/address is PII whatever it contains
 #     (but expect renamed columns on hidden data: "Patient's Name", "Gram/Mohalla", ...);
 #   * a name gazetteer in Latin AND Devanagari, transliteration (Mohammad/Mohd/Md./मोहम्मद),
@@ -248,12 +247,7 @@ def process_csv(rows: list[list[str]], delimiter: str, rel: str, records: list, 
     w = csv.writer(buf, delimiter=delimiter, lineterminator="\n")
     kinds = [identifier_kind(label) for label in header]
     decisions = [lookup(dict(zip(header, row))) for row in body]
-    orders = [
-        True if "mm/dd" in label.casefold() else
-        False if "dd/mm" in label.casefold() else
-        infer_date_order(row[index] for row in body if index < len(row))
-        for index, label in enumerate(header)
-    ]
+    orders = column_date_orders(header, body)
     w.writerow([clean_text(label) for label in header])
     for i, (row, (pid, days, age_width)) in enumerate(zip(body, decisions)):
         before = Stats.transformations
@@ -409,9 +403,20 @@ def evidence_records(doc):
 
 
 def resolve(batches):
+    assignments = list(identity_groups(batches))
+    used = set()
+    groups = {}
+    for group in sorted({group for _, _, group in assignments}):
+        attempt = 0
+        candidate = pseudonym(group)
+        while candidate in used:
+            attempt += 1
+            candidate = pseudonym(group, attempt)
+        used.add(candidate)
+        groups[group] = candidate, date_shift_days(group)
     decisions = defaultdict(dict)
-    for namespace, local, group in identity_groups(batches):
-        decisions[namespace][local] = (pseudonym(group), date_shift_days(group))
+    for namespace, local, group in assignments:
+        decisions[namespace][local] = groups[group]
     return decisions
 
 

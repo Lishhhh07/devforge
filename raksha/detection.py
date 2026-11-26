@@ -35,6 +35,7 @@ _FIELDS = {
 
 
 def _normalize(label: str) -> str:
+    label = unicodedata.normalize("NFKC", label)
     label = re.sub(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])", " ", label)
     label = re.sub(r"[_/().:-]+", " ", label.replace("'", "").replace("’", ""))
     return " ".join(label.casefold().split())
