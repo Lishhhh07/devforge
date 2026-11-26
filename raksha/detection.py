@@ -9,18 +9,21 @@ _FIELDS = {
         "given name", "family name", "naam", "नाम", "relative name", "guardian",
         "guardian name", "attendant name", "pita pati ka naam", "मरीज का नाम",
         "मरीज़ का नाम", "रोगी का नाम", "अभिभावक का नाम",
+        "पिता का नाम", "पति का नाम", "पिता पति का नाम", "परिजन का नाम",
     ),
     "MRN": (
         "uhid", "mrn", "patient id", "patient ref", "reg no", "registration no",
         "registration number", "ipd no", "opd no", "admission id", "hospital id", "hospital uhid",
     ),
-    "PHONE": ("mobile", "mobile no", "mobile number", "phone", "phone no", "telephone"),
+    "PHONE": ("mobile", "mobile no", "mobile number", "phone", "phone no", "telephone",
+              "मोबाइल", "मोबाइल नंबर", "फ़ोन", "फोन", "दूरभाष"),
     "EMAIL": ("email", "email address"),
     "AADHAAR": ("aadhaar", "aadhaar no", "aadhaar number", "aadhar", "aadhar no"),
     "ABHA": ("abha", "abha no", "abha number", "abha address"),
     "PAN": ("pan", "pan no", "pan number"),
     "INSURANCE_ID": ("insurance id", "policy number", "member id"),
-    "ADDRESS": ("address", "street", "house", "house no", "landmark", "locality", "pata"),
+    "ADDRESS": ("address", "street", "house", "house no", "landmark", "locality", "pata",
+                "पता", "मकान", "मकान नंबर", "मोहल्ला"),
     "SOURCE_PATH": ("source path", "original filename", "source filename"),
     "ENCOUNTER": ("encounter id", "encounter ref"),
     "AGE": ("age", "age years", "umar", "उम्र"),
@@ -74,12 +77,22 @@ _LATIN_NAME = r"[A-Z][a-z]+(?:[.'’-][A-Za-z]+)*"
 _NAME_WORD = rf"(?:{_LATIN_NAME}|{_HINDI_NAME})"
 _EXPLICIT_NAME = re.compile(
     rf"(?m)^([ \t]*(?:(?i:patient|pt\.?|attendant|guardian|mareez ka naam|"
-    rf"rogi ka naam)|मरी[ज़ज] का नाम|मरीज़ का नाम|रोगी का नाम|अभिभावक का नाम)"
+    rf"rogi ka naam)|मरी[ज़ज] का नाम|मरीज़ का नाम|रोगी का नाम|"
+    rf"(?:अभिभावक|पिता(?:/पति)?|पति|परिजन) का नाम)"
     rf"[ \t]*:[ \t]*)({_NAME_WORD}(?:[ \t]+{_NAME_WORD}){{0,3}})"
 )
 _HONORIFIC_NAME = re.compile(
     rf"(?<![\w.\u0900-\u097f])({_NAME_WORD}(?:[ \t]+{_NAME_WORD}){{0,2}})"
     r"(?=[ \t]+(?i:ji|sahab|saheb|didi|behenji|bhaiya)[ \t]+(?i:ka|ki|ke|ne|ko)\b)"
+)
+_CLINICAL_POSSESSOR = re.compile(
+    rf"(?<![\w.\u0900-\u097f])({_NAME_WORD}(?:[ \t]+{_NAME_WORD}){{0,2}})"
+    r"(?=[ \t]+(?i:ka|ki|ke)[ \t]+(?i:BP|pulse|spo2|temp(?:erature)?|"
+    r"sugar|glucose|report|tabiyat|ilaaj)\b)"
+)
+_HINDI_LOCATION = re.compile(
+    r"(?m)(?<![\w\u0900-\u097f])(पता|ग्राम|गाँव|गांव|मोहल्ला|मकान(?: नंबर)?)"
+    r"([ \t]*[:=][ \t]*)([^\r\n,;|]+)"
 )
 _CLINICIAN_PREFIX = re.compile(r"(?i)(?:\bdr\.?|\bdoctor|डॉ\.?)\s*$")
 _CLINICAL_WORDS = frozenset({
@@ -107,7 +120,10 @@ def redact_contextual_names(text):
         return "[NAME]"
 
     text = _EXPLICIT_NAME.sub(replace_explicit, text)
-    text = _HONORIFIC_NAME.sub(replace_honorific, text)
+    for pattern in (_HONORIFIC_NAME, _CLINICAL_POSSESSOR):
+        text = pattern.sub(replace_honorific, text)
+    text, location_count = _HINDI_LOCATION.subn(r"\1\2[ADDRESS]", text)
+    count += location_count
     return text, count
 
 
