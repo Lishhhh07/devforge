@@ -34,12 +34,15 @@ import time
 from pathlib import Path
 
 from raksha.dates import infer_date_order, shift_dates
-from raksha.detection import identifier_kind, is_coarse_location, redact_contextual_names, village_region
+from raksha.detection import (
+    identifier_kind, is_coarse_location, known_name_keys, redact_contextual_names,
+    redact_known_names, village_region,
+)
 from raksha.distributed import coordinate, identity_groups, linkage_token, partition
 from raksha.fhir import patient_evidence, rewrite_bundle
 from raksha.ingestion import Quarantine, parse
 from raksha.linkage import patient_key, redact_labelled_ids, shared_identity
-from raksha.release import age_value, plan_age_bands, proposed_profile_fields
+from raksha.release import age_value, plan_age_bands, proposed_profile_fields, validate_record_index
 from raksha.timeline import encounter_key, encounter_offsets, redact_encounter
 
 ATTACHMENT_FIELDS = {"attachment", "attachments"}
@@ -146,6 +149,7 @@ class Stats:
     suppressed = 0
     transformations = 0
     known_ids = frozenset()
+    known_names = frozenset()
 
 
 _ID_WORD = re.compile(r"(?<![\w/-])[A-Z]{2,}[A-Z0-9/-]*\d{3,}(?![\w/-])", re.IGNORECASE)
@@ -159,6 +163,8 @@ def clean_text(text: str) -> str:
         Stats.identifiers += n
     text, contextual_count = redact_contextual_names(text)
     Stats.identifiers += contextual_count
+    text, known_count = redact_known_names(text, Stats.known_names)
+    Stats.identifiers += known_count
     def redact_known_id(match):
         if match[0].upper() in Stats.known_ids:
             Stats.identifiers += 1
@@ -418,6 +424,7 @@ def hospital_worker(connection, namespace, paths):
     try:
         evidence, documents = set(), []
         known_ids = set()
+        known_names = set()
         for index, path, relative in paths:
             raw = path.read_bytes()
             entry = {"input_sha256": hashlib.sha256(raw).hexdigest()}
@@ -429,6 +436,7 @@ def hospital_worker(connection, namespace, paths):
             documents.append((index, relative, entry, doc))
             if doc is not None:
                 for record in evidence_records(doc):
+                    known_names.update(known_name_keys(record))
                     key = patient_key(record)
                     if key:
                         known_ids.add(key.split("|", 1)[1])
@@ -438,6 +446,7 @@ def hospital_worker(connection, namespace, paths):
                                       linkage_token(SECRET, "shared", shared) if shared else ""))
         connection.send(("evidence", evidence))
         Stats.known_ids = frozenset(known_ids)
+        Stats.known_names = frozenset(known_names)
         decisions = connection.recv()
 
         def identity(record):
@@ -553,6 +562,7 @@ def main() -> int:
             name = entry["output"]
             if name in output_paths or any(record["file"] != name for record in entries):
                 raise RuntimeError("invalid_output_mapping")
+            validate_record_index(name, result, entries)
             output_paths.add(name)
         (out / "sanitized").mkdir(parents=True, exist_ok=True)
         for _, entry, result, _ in staged:

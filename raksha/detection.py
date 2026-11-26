@@ -1,6 +1,7 @@
 """Classify direct identifiers using their field labels."""
 
 import re
+import unicodedata
 
 _FIELDS = {
     "NAME": (
@@ -108,3 +109,79 @@ def redact_contextual_names(text):
     text = _EXPLICIT_NAME.sub(replace_explicit, text)
     text = _HONORIFIC_NAME.sub(replace_honorific, text)
     return text, count
+
+
+_NAME_TOKEN = re.compile(
+    r"(?:[^\W\d_]|[\u0900-\u097f])+(?:[.'’-](?:[^\W\d_]|[\u0900-\u097f])+)*"
+)
+_CLINICIAN_CONTEXT = re.compile(
+    r"(?i)(?:\b(?:dr\.?|doctor|consultant|attending|treating physician|signed by)"
+    r"|डॉ\.?)\s*[:=-]?\s*$"
+)
+
+
+def _name_key(parts):
+    return tuple(unicodedata.normalize("NFC", part).casefold() for part in parts)
+
+
+def known_name_keys(record):
+    """Collect complete names from explicit patient and relative fields only."""
+    if not isinstance(record, dict):
+        return set()
+    fields = [record]
+    for label in ("patient", "demographics"):
+        if isinstance(record.get(label), dict):
+            fields.append(record[label])
+    names = set()
+    for scope in fields:
+        explicit_identity = scope is not record or any(identifier_kind(label) == "MRN" for label in scope)
+        split = {}
+        for label, value in scope.items():
+            if not isinstance(value, str) or identifier_kind(label) != "NAME":
+                continue
+            field = _normalize(label)
+            if field == "name" and not explicit_identity:
+                continue
+            if field in {"first name", "given name", "last name", "family name"}:
+                split["first" if field in {"first name", "given name"} else "last"] = value
+            parts = value.split()
+            if 2 <= len(parts) <= 4 and all(_NAME_TOKEN.fullmatch(part) for part in parts):
+                names.add(_name_key(parts))
+        if len(split) == 2:
+            parts = (split["first"] + " " + split["last"]).split()
+            if 2 <= len(parts) <= 4 and all(_NAME_TOKEN.fullmatch(part) for part in parts):
+                names.add(_name_key(parts))
+    return names
+
+
+def redact_known_names(text, names):
+    """Replace exact, complete names while keeping clinician occurrences."""
+    if not names:
+        return text, 0
+    tokens = list(_NAME_TOKEN.finditer(text))
+    spans = []
+    index = 0
+    while index + 1 < len(tokens):
+        start = tokens[index].start()
+        prefix = text[max(0, start - 48):start].rsplit("\n", 1)[-1]
+        match = None
+        for size in range(min(4, len(tokens) - index), 1, -1):
+            phrase = tokens[index:index + size]
+            if any(not re.fullmatch(r"[ \t]+", text[a.end():b.start()])
+                   for a, b in zip(phrase, phrase[1:])):
+                continue
+            if _name_key(token[0] for token in phrase) in names:
+                match = size
+                if not _CLINICIAN_CONTEXT.search(prefix):
+                    spans.append((start, phrase[-1].end()))
+                break
+        index += match or 1
+    if not spans:
+        return text, 0
+    chunks = []
+    previous = 0
+    for start, end in spans:
+        chunks.extend((text[previous:start], "[NAME]"))
+        previous = end
+    chunks.append(text[previous:])
+    return "".join(chunks), len(spans)
